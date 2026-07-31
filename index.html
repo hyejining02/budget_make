@@ -463,9 +463,9 @@
     <section class="view" id="view-corp">
       <div class="topbar"><h1>법카</h1></div>
       <div class="month-nav">
-        <button data-mv="-1" aria-label="이전 달">‹</button>
+        <button data-cmv="-1" aria-label="이전 달">‹</button>
         <div class="label num" id="corp-month">2026년 7월</div>
-        <button data-mv="1" aria-label="다음 달">›</button>
+        <button data-cmv="1" aria-label="다음 달">›</button>
       </div>
 
       <div class="card summary">
@@ -502,6 +502,15 @@
           <span class="switch" id="carry-switch"><i></i></span>
         </div>
       </div>
+
+      <div class="section-title">급여 주기</div>
+      <div class="data-btns">
+        <div class="data-btn">
+          <span>한 달 시작일</span>
+          <select id="cycle-day" style="border:none;background:transparent;color:var(--ink);font-size:15px;font-weight:600;text-align:right;outline:none;-webkit-appearance:none;appearance:none;max-width:60%"></select>
+        </div>
+      </div>
+      <div style="font-size:12.5px;color:var(--muted);padding:8px 6px 0;line-height:1.6">급여일을 시작일로 정하면 그 날부터 다음달 전날까지가 한 달이 돼요. (예: 25일 → 25일~다음달 24일) 법카는 회사 기준대로 매월 1일로 유지돼요.</div>
 
       <div class="section-title">카테고리</div>
       <div class="data-btns">
@@ -757,6 +766,7 @@ function normalizeData() {
   if (!data.corp.entries) data.corp.entries = [];
   if (!data.settings) data.settings = {};                       // ★ 추가: 표시 설정
   if (typeof data.settings.carryover !== 'boolean') data.settings.carryover = true; // 이월 잔액 기본 켜짐
+  if (typeof data.settings.cycleDay !== 'number') data.settings.cycleDay = 1; // ★ 급여 주기 시작일(1=달력)
   if (!data.cats) data.cats = JSON.parse(JSON.stringify(DEFAULT_CATS)); // ★ 추가: 카테고리(사용자 편집 가능)
   if (!data.cats.expense) data.cats.expense = JSON.parse(JSON.stringify(DEFAULT_CATS.expense));
   if (!data.cats.income) data.cats.income = JSON.parse(JSON.stringify(DEFAULT_CATS.income));
@@ -834,69 +844,141 @@ const now = new Date();
 const state = {
   tab: 'ledger',
   year: now.getFullYear(),
-  month: now.getMonth(),   // 0~11
+  month: now.getMonth(),   // 개인 탭: 현재 '주기'가 시작하는 달 (달력 모드면 그냥 그 달)
   statType: 'expense',
-  // 입력시트 편집 상태
   editId: null,
   formType: 'expense',
   formCat: null,
 };
+// 법카는 회사 규정대로 항상 '달력 월(1일~말일)' → 별도 상태
+const corpState = { year: now.getFullYear(), month: now.getMonth() };
 
-function monthLabel() { return `${state.year}년 ${state.month + 1}월`; }
-function txInMonth() {
-  const k = ymKey(state.year, state.month);
-  return data.transactions.filter(t => t.date && t.date.slice(0, 7) === k);
+/* ---------- 급여 주기 계산 (★ 추가) ----------
+   cycleDay = 1 이면 달력(1일~말일). 2~31이면 그 날짜부터 다음달 (날짜-1)일까지가 한 '달'. */
+function cycleDay() { const d = data.settings && data.settings.cycleDay; return (d && d >= 2) ? d : 1; }
+function daysInMonthOf(y, m) { return new Date(y, m + 1, 0).getDate(); }
+
+// 어떤 날짜가 속한 '주기'의 시작 달(anchor) 반환
+function currentCycleAnchor(dateObj) {
+  const D = cycleDay();
+  const y = dateObj.getFullYear(), m = dateObj.getMonth(), day = dateObj.getDate();
+  if (D <= 1 || day >= D) return { year: y, month: m };
+  const p = new Date(y, m - 1, 1);   // 시작일 전이면 이전 달이 시작 달
+  return { year: p.getFullYear(), month: p.getMonth() };
 }
-// ★ 추가: 현재 보고 있는 달에 적용되는 고정지출을 '가상 거래'로 생성
-//         (실제로 저장하진 않고, 렌더링할 때마다 달에 맞춰 만들어 냄 → 매월 자동 반영)
+
+// 현재 anchor(state)의 기간 [startStr, endStr] (둘 다 포함)
+function periodBounds() {
+  const D = cycleDay();
+  if (D <= 1) {
+    const last = daysInMonthOf(state.year, state.month);
+    return {
+      startStr: `${state.year}-${pad(state.month + 1)}-01`,
+      endStr: `${state.year}-${pad(state.month + 1)}-${pad(last)}`,
+    };
+  }
+  const sd = Math.min(D, daysInMonthOf(state.year, state.month));
+  const startStr = `${state.year}-${pad(state.month + 1)}-${pad(sd)}`;
+  const ny = state.month === 11 ? state.year + 1 : state.year;
+  const nm = (state.month + 1) % 12;
+  const nsd = Math.min(D, daysInMonthOf(ny, nm));
+  const e = new Date(ny, nm, nsd); e.setDate(e.getDate() - 1);   // 다음 주기 시작 하루 전
+  return { startStr, endStr: `${e.getFullYear()}-${pad(e.getMonth() + 1)}-${pad(e.getDate())}` };
+}
+// 기간이 걸치는 달력 달들 [{y,m}]
+function periodMonths(startStr, endStr) {
+  const [ay, am] = startStr.split('-').map(Number);
+  const [by, bm] = endStr.split('-').map(Number);
+  const endIdx = by * 12 + (bm - 1);
+  const res = []; let y = ay, m = am - 1;
+  while (y * 12 + m <= endIdx) { res.push({ y, m }); m++; if (m > 11) { m = 0; y++; } }
+  return res;
+}
+function monthLabel() { return `${state.year}년 ${state.month + 1}월`; } // (법카용은 corpState로 별도)
+function periodLabel() {
+  if (cycleDay() <= 1) return `${state.year}년 ${state.month + 1}월`;
+  const { startStr, endStr } = periodBounds();
+  const [, sm, sd] = startStr.split('-').map(Number);
+  const [, em, ed] = endStr.split('-').map(Number);
+  return `${sm}/${sd} ~ ${em}/${ed}`;
+}
+
+/* ---------- 기간 기준 데이터 조회 ---------- */
+function txInMonth() {   // 이름은 유지하되 '현재 기간' 거래 반환
+  const { startStr, endStr } = periodBounds();
+  return data.transactions.filter(t => t.date && t.date >= startStr && t.date <= endStr);
+}
 function activeFixed() {
-  const ym = ymKey(state.year, state.month);
-  return data.fixed.filter(f => !f.since || f.since <= ym); // 등록한 달부터 매월 적용
+  const startYM = periodBounds().startStr.slice(0, 7);
+  return data.fixed.filter(f => !f.since || f.since <= startYM);
 }
+// 이번 기간에 실제로 발생하는 고정지출을 '가상 거래'로 생성
 function monthFixedTx() {
-  const ym = ymKey(state.year, state.month);
-  const lastDay = new Date(state.year, state.month + 1, 0).getDate(); // 이 달의 마지막 날
-  return activeFixed().map(f => ({
-    id: 'fix-' + f.id, fixedId: f.id, type: 'expense',
-    amount: f.amount, category: f.category, memo: '고정지출', fixed: true,
-    date: `${ym}-${pad(Math.min(f.day || 1, lastDay))}`,
-  }));
+  const { startStr, endStr } = periodBounds();
+  const months = periodMonths(startStr, endStr);
+  return activeFixed().map(f => {
+    for (const { y, m } of months) {
+      const dd = Math.min(f.day || 1, daysInMonthOf(y, m));
+      const dstr = `${y}-${pad(m + 1)}-${pad(dd)}`;
+      if (dstr >= startStr && dstr <= endStr) {
+        return { id: 'fix-' + f.id, fixedId: f.id, type: 'expense',
+                 amount: f.amount, category: f.category, memo: '고정지출', fixed: true, date: dstr };
+      }
+    }
+    return null;
+  }).filter(Boolean);
 }
-function fixedTotal() { return activeFixed().reduce((a, f) => a + f.amount, 0); }
+function fixedTotal() { return monthFixedTx().reduce((a, t) => a + t.amount, 0); }
 
-// ★ 추가: 지난달까지 누적된 이월 잔액 (전체 수입 - 전체 지출 - 이전 달들의 고정지출)
+// 고정지출 f가 startStr 이전에 발생한 횟수 (이월 계산용)
+function fixedOccurrenceCountBefore(f, startStr) {
+  const since = f.since || '2000-01';
+  let [y, m] = since.split('-').map(Number); m -= 1;
+  let count = 0, guard = 0;
+  while (guard++ < 1200) {
+    const dd = Math.min(f.day || 1, daysInMonthOf(y, m));
+    const dstr = `${y}-${pad(m + 1)}-${pad(dd)}`;
+    if (dstr >= startStr) break;
+    count++; m++; if (m > 11) { m = 0; y++; }
+  }
+  return count;
+}
+// 이번 기간 시작 전까지의 이월 잔액
 function carryBefore() {
-  const curYM = ymKey(state.year, state.month);
-  const curIdx = state.year * 12 + state.month;
+  const { startStr } = periodBounds();
   let inc = 0, exp = 0;
   data.transactions.forEach(t => {
-    if (!t.date || t.date.slice(0, 7) >= curYM) return; // 이번 달 이전만
+    if (!t.date || t.date >= startStr) return;
     if (t.type === 'income') inc += t.amount; else exp += t.amount;
   });
   let fixedBefore = 0;
-  (data.fixed || []).forEach(f => {
-    const since = f.since || curYM;
-    const [sy, sm] = since.split('-').map(Number);
-    const sinceIdx = sy * 12 + (sm - 1);
-    fixedBefore += (f.amount || 0) * Math.max(0, curIdx - sinceIdx); // since ~ 지난달까지의 개월 수
-  });
+  (data.fixed || []).forEach(f => { fixedBefore += (f.amount || 0) * fixedOccurrenceCountBefore(f, startStr); });
   return inc - exp - fixedBefore;
 }
-function moveMonth(dir) {
+
+function moveMonth(dir) {          // 개인 탭: 다음/이전 주기로
   state.month += dir;
   if (state.month < 0) { state.month = 11; state.year--; }
   if (state.month > 11) { state.month = 0; state.year++; }
   renderAll();
+}
+function moveCorpMonth(dir) {       // ★ 법카: 다음/이전 달력 월로 (독립)
+  corpState.month += dir;
+  if (corpState.month < 0) { corpState.month = 11; corpState.year--; }
+  if (corpState.month > 11) { corpState.month = 0; corpState.year++; }
+  renderCorp();
+  document.getElementById('corp-month').textContent = `${corpState.year}년 ${corpState.month + 1}월`;
 }
 
 /* =====================================================================
    렌더링
    ===================================================================== */
 function renderAll() {
-  document.getElementById('ledger-month').textContent = monthLabel();
-  document.getElementById('stats-month').textContent = monthLabel();
-  document.getElementById('budget-month').textContent = monthLabel();
-  document.getElementById('corp-month').textContent = monthLabel();   // ★ 법카
+  const pl = periodLabel();
+  document.getElementById('ledger-month').textContent = pl;
+  document.getElementById('stats-month').textContent = pl;
+  document.getElementById('budget-month').textContent = pl;
+  document.getElementById('corp-month').textContent = `${corpState.year}년 ${corpState.month + 1}월`; // ★ 법카는 달력 월
   renderLedger();
   renderStats();
   renderBudget();
@@ -1254,9 +1336,9 @@ function saveTx() {
     data.transactions.push(record);
   }
   save();
-  // 저장한 내역의 달로 이동해서 보여주기
+  // 저장한 내역이 속한 '주기'로 이동해서 보여주기
   const d = new Date(record.date + 'T00:00:00');
-  state.year = d.getFullYear(); state.month = d.getMonth();
+  const a = currentCycleAnchor(d); state.year = a.year; state.month = a.month;
   closeSheet();
   renderAll();
   toast(state.editId ? '수정했어요' : '저장했어요');
@@ -1333,7 +1415,7 @@ function deleteFixed() {
    - 월 한도(기본 5만) 안에서 일별 사용 내역 + 남은 잔액 표시
    ===================================================================== */
 function corpInMonth() {
-  const k = ymKey(state.year, state.month);
+  const k = ymKey(corpState.year, corpState.month);   // ★ 법카는 corpState(달력 월)
   return (data.corp.entries || []).filter(e => e.date && e.date.slice(0, 7) === k);
 }
 function renderCorp() {
@@ -1435,7 +1517,7 @@ function saveCorp() {
   }
   save();
   const d = new Date(rec.date + 'T00:00:00');
-  state.year = d.getFullYear(); state.month = d.getMonth();
+  corpState.year = d.getFullYear(); corpState.month = d.getMonth();   // ★ 법카는 corpState
   closeCorp(); renderAll(); toast(corpEditId ? '수정했어요' : '저장했어요');
 }
 function deleteCorp() {
@@ -1566,7 +1648,7 @@ function importData(file) {
 }
 function resetData() {
   if (!confirm('모든 내역과 예산이 삭제돼요. 계속할까요?')) return;
-  data = { transactions: [], budget: { total: {}, cats: {} }, fixed: [], corp: { limit: 50000, entries: [] }, settings: { carryover: true }, cats: JSON.parse(JSON.stringify(DEFAULT_CATS)) }; // ★ 카테고리도 기본값으로 초기화
+  data = { transactions: [], budget: { total: {}, cats: {} }, fixed: [], corp: { limit: 50000, entries: [] }, settings: { carryover: true, cycleDay: 1 }, cats: JSON.parse(JSON.stringify(DEFAULT_CATS)) }; // ★ 카테고리도 기본값으로 초기화
   save(); renderAll(); toast('초기화했어요');
 }
 
@@ -1581,6 +1663,8 @@ function bind() {
   // 월 이동 (각 탭 공통)
   document.querySelectorAll('[data-mv]').forEach(b =>
     b.addEventListener('click', () => moveMonth(parseInt(b.getAttribute('data-mv'), 10))));
+  document.querySelectorAll('[data-cmv]').forEach(b =>   // ★ 법카 전용 월 이동
+    b.addEventListener('click', () => moveCorpMonth(parseInt(b.getAttribute('data-cmv'), 10))));
 
   // 통계 지출/수입 토글
   document.querySelectorAll('.stat-toggle button').forEach(b =>
@@ -1896,6 +1980,22 @@ function bindSettings() {
   refreshCarryUI();
   refreshInstallUI();
 
+  // ★ 급여 주기 시작일
+  const cd = document.getElementById('cycle-day');
+  cd.innerHTML = ['<option value="1">달력 기준 (1일~말일)</option>']
+    .concat(Array.from({ length: 30 }, (_, i) => {
+      const n = i + 2; return `<option value="${n}">매월 ${n}일 ~ 다음달 ${n - 1}일</option>`;
+    })).join('');
+  cd.value = String(data.settings.cycleDay || 1);
+  cd.addEventListener('change', () => {
+    data.settings.cycleDay = parseInt(cd.value, 10) || 1;
+    save();
+    const a = currentCycleAnchor(new Date());   // 오늘이 속한 주기로 이동
+    state.year = a.year; state.month = a.month;
+    renderAll();
+    toast(data.settings.cycleDay >= 2 ? `매월 ${data.settings.cycleDay}일 시작으로 설정했어요` : '달력 기준으로 설정했어요');
+  });
+
   // ★ 카테고리 관리
   document.getElementById('btn-cats').addEventListener('click', openCatMgmt);
   document.getElementById('cat-close').addEventListener('click', closeCatMgmt);
@@ -1917,6 +2017,7 @@ function refreshCarryUI() {
 
 /* ---------- 시작 ---------- */
 load();
+Object.assign(state, currentCycleAnchor(new Date())); // ★ 오늘이 속한 주기로 시작
 loadLock();        // ★ 잠금 설정 불러오기
 bind();
 bindLock();        // ★ 잠금 이벤트 연결
