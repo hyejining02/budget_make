@@ -1,0 +1,16 @@
+{
+  "name": "가계부",
+  "short_name": "가계부",
+  "description": "간단한 개인 가계부 — 수입·지출, 고정지출, 예산, 월별 통계",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "lang": "ko",
+  "background_color": "#F2F4F5",
+  "theme_color": "#0D7C66",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

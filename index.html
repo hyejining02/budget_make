@@ -1,0 +1,1718 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<!-- 아이폰 화면/노치 안전영역 대응: viewport-fit=cover 필수 -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+
+<!-- 홈화면에 추가했을 때 전체화면 웹앱처럼 동작하게 하는 iOS 메타태그 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="가계부">
+<meta name="theme-color" content="#0D7C66" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101613" media="(prefers-color-scheme: dark)">
+
+<!-- ★ 추가: PWA 매니페스트(안드로이드 설치용) + 홈화면 아이콘 -->
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="favicon-32.png">
+
+<title>가계부</title>
+
+<style>
+  /* =========================================================
+     디자인 토큰 (색/타이포)  ── 라이트 & 다크 모드 자동 전환
+     - 브랜드/수입: 딥 틸그린,  지출: 벽돌빛 레드,  경고: 앰버
+     - 숫자는 통장(ledger)처럼 등폭 숫자(tabular-nums)로 정렬
+     ========================================================= */
+  :root {
+    --bg: #F2F4F5;
+    --card: #FFFFFF;
+    --card-2: #F7F9F9;
+    --ink: #17201C;
+    --muted: #6E7B76;
+    --line: #E6EAE9;
+    --accent: #0D7C66;      /* 브랜드 = 수입(+) 색 */
+    --income: #0D7C66;
+    --expense: #D84C3E;     /* 지출(-) 색 */
+    --amber: #E8973A;       /* 예산 경고 */
+    --accent-soft: #E1F0EC;
+    --expense-soft: #FBE6E3;
+    --shadow: 0 1px 2px rgba(20,30,25,.06), 0 8px 24px rgba(20,30,25,.06);
+    --radius: 18px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101613;
+      --card: #18211D;
+      --card-2: #202B26;
+      --ink: #E8EDEA;
+      --muted: #93A29B;
+      --line: #263029;
+      --accent: #1EA085;
+      --income: #35B89C;
+      --expense: #F0705F;
+      --amber: #F0A64C;
+      --accent-soft: #16302A;
+      --expense-soft: #2E1C1A;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+                 "Pretendard", "Noto Sans KR", "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior-y: none;
+  }
+  /* 금액 등 숫자는 자릿수 정렬되게 등폭 숫자 사용 */
+  .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+  button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+  input, select { font-family: inherit; }
+
+  /* ---------- 레이아웃 뼈대 ---------- */
+  #app { max-width: 520px; margin: 0 auto; min-height: 100%; }
+  main {
+    padding: 0 16px;
+    /* 하단 탭바 + 안전영역 만큼 여백 확보 */
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+    padding-top: calc(8px + env(safe-area-inset-top));
+  }
+  .view { display: none; animation: fade .25s ease; }
+  .view.active { display: block; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { *, ::before, ::after { animation: none !important; transition: none !important; } }
+
+  /* ---------- 헤더 / 월 선택기 ---------- */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 4px 6px;
+  }
+  .topbar h1 { font-size: 22px; font-weight: 800; letter-spacing: -.5px; margin: 0; }
+  .icon-btn {
+    width: 38px; height: 38px; border-radius: 12px; background: var(--card);
+    display: grid; place-items: center; box-shadow: var(--shadow); font-size: 17px;
+  }
+  .month-nav {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    margin: 4px 0 14px;
+  }
+  .month-nav button { width: 40px; height: 40px; border-radius: 12px; font-size: 20px; color: var(--muted); }
+  .month-nav button:active { background: var(--card); }
+  .month-nav .label { font-size: 17px; font-weight: 700; min-width: 128px; text-align: center; letter-spacing: -.3px; }
+
+  /* ---------- 카드 공통 ---------- */
+  .card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); }
+
+  /* ---------- 이번 달 요약(히어로) ---------- */
+  .summary { padding: 20px; margin-bottom: 16px; }
+  .summary .row { display: flex; gap: 12px; }
+  .summary .cell { flex: 1; }
+  .summary .cap { font-size: 12.5px; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
+  .summary .val { font-size: 19px; font-weight: 800; letter-spacing: -.5px; }
+  .summary .val.in { color: var(--income); }
+  .summary .val.out { color: var(--expense); }
+  .divider { height: 1px; background: var(--line); margin: 16px 0; border: 0; }
+
+  /* 예산 게이지 */
+  .budget-block .gtop { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+  .budget-block .gtop .t { font-size: 13px; font-weight: 600; color: var(--muted); }
+  .budget-block .gtop .r { font-size: 14px; font-weight: 700; }
+  .gauge { height: 12px; border-radius: 99px; background: var(--card-2); overflow: hidden; }
+  .gauge > i { display: block; height: 100%; border-radius: 99px; transition: width .5s cubic-bezier(.4,0,.2,1); }
+  .budget-hint { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+  .set-budget-link { color: var(--accent); font-weight: 700; }
+
+  /* ---------- 거래 내역 리스트 ---------- */
+  .day-group { margin-bottom: 6px; }
+  .day-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 18px 6px 8px;
+  }
+  .day-head .d { font-size: 13.5px; font-weight: 700; color: var(--ink); }
+  .day-head .sum { font-size: 12.5px; color: var(--muted); }
+  .tx-list { border-radius: var(--radius); overflow: hidden; }
+  .tx {
+    display: flex; align-items: center; gap: 12px; padding: 13px 16px;
+    background: var(--card); border-bottom: 1px solid var(--line);
+  }
+  .tx:last-child { border-bottom: none; }
+  .tx:active { background: var(--card-2); }
+  .tx .emo {
+    width: 40px; height: 40px; border-radius: 12px; background: var(--card-2);
+    display: grid; place-items: center; font-size: 20px; flex-shrink: 0;
+  }
+  .tx .body { flex: 1; min-width: 0; }
+  .tx .cat { font-size: 15px; font-weight: 600; }
+  .tx .memo { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tx .amt { font-size: 15.5px; font-weight: 800; letter-spacing: -.3px; white-space: nowrap; }
+  .tx .amt.in { color: var(--income); }
+  .tx .amt.out { color: var(--ink); }
+
+  /* ---------- 고정지출 칸 (★ 추가) ---------- */
+  .add-fixed { width: 100%; padding: 14px 16px; text-align: center; color: var(--accent); font-size: 14.5px; font-weight: 700; background: var(--card); }
+  .add-fixed:active { background: var(--card-2); }
+  .tx .pin { font-size: 11px; font-weight: 700; color: var(--muted); background: var(--card-2); padding: 2px 7px; border-radius: 6px; margin-left: 8px; }
+  .field-row select { border: none; background: transparent; color: var(--ink); font-size: 15px; text-align: right; outline: none; -webkit-appearance: none; appearance: none; padding-right: 2px; }
+
+  /* ---------- 빈 상태 ---------- */
+  .empty { text-align: center; padding: 60px 20px; color: var(--muted); }
+  .empty .big { font-size: 40px; margin-bottom: 12px; }
+  .empty .t { font-size: 15px; font-weight: 600; margin-bottom: 4px; color: var(--ink); }
+  .empty .s { font-size: 13px; }
+
+  /* ---------- 통계 ---------- */
+  .stat-toggle { display: flex; background: var(--card-2); border-radius: 12px; padding: 4px; margin-bottom: 16px; }
+  .stat-toggle button { flex: 1; padding: 9px; border-radius: 9px; font-size: 14px; font-weight: 700; color: var(--muted); }
+  .stat-toggle button.on { background: var(--card); color: var(--ink); box-shadow: var(--shadow); }
+  .donut-wrap { display: flex; flex-direction: column; align-items: center; padding: 22px 20px 10px; }
+  .donut { position: relative; width: 190px; height: 190px; }
+  .donut .center { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; }
+  .donut .center .cap { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .donut .center .big { font-size: 21px; font-weight: 800; letter-spacing: -.5px; }
+  .cat-line { display: flex; align-items: center; gap: 12px; padding: 12px 4px; border-top: 1px solid var(--line); }
+  .cat-line:first-child { border-top: none; }
+  .cat-line .dot { width: 11px; height: 11px; border-radius: 4px; flex-shrink: 0; }
+  .cat-line .nm { flex: 1; font-size: 14.5px; font-weight: 600; }
+  .cat-line .pct { font-size: 12.5px; color: var(--muted); width: 42px; text-align: right; }
+  .cat-line .mo { font-size: 14.5px; font-weight: 700; width: 96px; text-align: right; letter-spacing: -.3px; }
+
+  /* ---------- 예산 탭 ---------- */
+  .section-title { font-size: 13px; font-weight: 700; color: var(--muted); margin: 22px 6px 10px; }
+  .budget-total-card { padding: 20px; }
+  .budget-total-card .lab { font-size: 13px; color: var(--muted); font-weight: 600; }
+  .amount-edit { display: flex; align-items: center; gap: 6px; margin: 6px 0 14px; }
+  .amount-edit .won { font-size: 24px; font-weight: 800; color: var(--muted); }
+  .amount-edit input {
+    flex: 1; border: none; background: transparent; color: var(--ink);
+    font-size: 27px; font-weight: 800; letter-spacing: -.5px; outline: none; min-width: 0;
+    padding: 0;
+  }
+  .catbudget { padding: 14px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); }
+  .catbudget:last-child { border-bottom: none; }
+  .catbudget .emo { width: 36px; height: 36px; border-radius: 10px; background: var(--card-2); display: grid; place-items: center; font-size: 18px; }
+  .catbudget .cb-body { flex: 1; min-width: 0; }
+  .catbudget .cb-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .catbudget .cb-nm { font-size: 14.5px; font-weight: 600; }
+  .catbudget .cb-fig { font-size: 12.5px; color: var(--muted); }
+  .catbudget input.cbinput {
+    width: 96px; text-align: right; border: 1px solid var(--line); background: var(--card-2);
+    border-radius: 9px; padding: 7px 9px; font-size: 14px; font-weight: 700; color: var(--ink); outline: none;
+  }
+  .catbudget input.cbinput:focus { border-color: var(--accent); }
+  .mini-gauge { height: 6px; border-radius: 99px; background: var(--card-2); overflow: hidden; }
+  .mini-gauge > i { display: block; height: 100%; border-radius: 99px; }
+
+  .data-btns { display: flex; flex-direction: column; gap: 1px; border-radius: var(--radius); overflow: hidden; }
+  .data-btn { padding: 15px 18px; background: var(--card); text-align: left; font-size: 15px; font-weight: 600; display: flex; justify-content: space-between; }
+  .data-btn:active { background: var(--card-2); }
+  .data-btn.danger { color: var(--expense); }
+  .data-btn .chev { color: var(--muted); }
+
+  /* ---------- 하단 탭바 ---------- */
+  .tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    display: flex; justify-content: space-around;
+    background: color-mix(in srgb, var(--card) 88%, transparent);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-top: 1px solid var(--line);
+    padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
+  }
+  .tabbar .tab {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    font-size: 10.5px; font-weight: 600; color: var(--muted); padding: 4px 0;
+  }
+  .tabbar .tab .ic { font-size: 21px; line-height: 1; }
+  .tabbar .tab.on { color: var(--accent); }
+
+  /* ---------- 플로팅 추가 버튼 ---------- */
+  .fab {
+    position: fixed; z-index: 41;
+    right: max(20px, calc(50% - 260px + 20px));
+    bottom: calc(78px + env(safe-area-inset-bottom));
+    width: 58px; height: 58px; border-radius: 20px;
+    background: var(--accent); color: #fff; font-size: 30px; font-weight: 400;
+    display: grid; place-items: center;
+    box-shadow: 0 6px 20px rgba(13,124,102,.4);
+  }
+  .fab:active { transform: scale(.94); }
+
+  /* ---------- 입력 바텀시트 ---------- */
+  .backdrop {
+    position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.4);
+    opacity: 0; pointer-events: none; transition: opacity .3s;
+  }
+  .backdrop.open { opacity: 1; pointer-events: auto; }
+  .sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 51;
+    max-width: 520px; margin: 0 auto;
+    background: var(--bg); border-radius: 22px 22px 0 0;
+    transform: translateY(100%); transition: transform .32s cubic-bezier(.32,.72,0,1);
+    padding: 8px 18px calc(20px + env(safe-area-inset-bottom));
+    max-height: 92vh; overflow-y: auto;
+  }
+  .sheet.open { transform: translateY(0); }
+  .grabber { width: 38px; height: 5px; border-radius: 99px; background: var(--line); margin: 8px auto 6px; }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .sheet-head .cancel { color: var(--muted); font-size: 15px; font-weight: 600; }
+  .sheet-head .title { font-size: 16px; font-weight: 800; }
+  .sheet-head .save { color: var(--accent); font-size: 15px; font-weight: 800; }
+
+  .type-toggle { display: flex; background: var(--card-2); border-radius: 13px; padding: 4px; margin-bottom: 18px; }
+  .type-toggle button { flex: 1; padding: 11px; border-radius: 10px; font-size: 15px; font-weight: 700; color: var(--muted); }
+  .type-toggle button.on-out { background: var(--card); color: var(--expense); box-shadow: var(--shadow); }
+  .type-toggle button.on-in { background: var(--card); color: var(--income); box-shadow: var(--shadow); }
+
+  .amt-input-row { text-align: center; margin: 6px 0 20px; }
+  .amt-input-row .won { font-size: 26px; font-weight: 800; color: var(--muted); vertical-align: 8px; margin-right: 4px; }
+  .amt-input-row input {
+    border: none; background: transparent; color: var(--ink);
+    font-size: 42px; font-weight: 800; text-align: center; outline: none;
+    width: 70%; letter-spacing: -1px;
+  }
+  .amt-input-row input::placeholder { color: var(--line); }
+
+  .field-label { font-size: 13px; font-weight: 700; color: var(--muted); margin: 4px 6px 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+  .chip {
+    display: flex; align-items: center; gap: 6px; padding: 9px 13px; border-radius: 12px;
+    background: var(--card); box-shadow: var(--shadow); font-size: 14px; font-weight: 600;
+  }
+  .chip .e { font-size: 16px; }
+  .chip.on { background: var(--accent); color: #fff; box-shadow: 0 4px 12px rgba(13,124,102,.35); }
+  .chip.on.exp { background: var(--expense); box-shadow: 0 4px 12px rgba(216,76,62,.32); }
+
+  .field { background: var(--card); border-radius: 14px; padding: 4px 16px; margin-bottom: 14px; box-shadow: var(--shadow); }
+  .field-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; }
+  .field-row .k { font-size: 15px; font-weight: 600; }
+  .field-row input[type=date] { border: none; background: transparent; color: var(--ink); font-size: 15px; text-align: right; outline: none; }
+  .field-row input[type=text] { border: none; background: transparent; color: var(--ink); font-size: 15px; text-align: right; outline: none; flex: 1; margin-left: 12px; }
+  .field-row input[type=text]::placeholder { color: var(--muted); }
+
+  .save-btn { width: 100%; padding: 16px; border-radius: 15px; background: var(--accent); color: #fff; font-size: 16px; font-weight: 800; margin-top: 6px; }
+  .save-btn.exp { background: var(--expense); }
+  .save-btn:active { opacity: .9; }
+  .delete-btn { width: 100%; padding: 14px; border-radius: 15px; background: var(--expense-soft); color: var(--expense); font-size: 15px; font-weight: 700; margin-top: 10px; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: calc(110px + env(safe-area-inset-bottom));
+    transform: translateX(-50%) translateY(20px); z-index: 60;
+    background: var(--ink); color: var(--bg); padding: 11px 20px; border-radius: 99px;
+    font-size: 14px; font-weight: 600; opacity: 0; pointer-events: none; transition: all .3s;
+    box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ---------- 토글 스위치 (★ 추가) ---------- */
+  .switch { width: 46px; height: 28px; border-radius: 99px; background: var(--line); position: relative; transition: background .2s; flex-shrink: 0; }
+  .switch.on { background: var(--accent); }
+  .switch i { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; transition: left .2s; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+  .switch.on i { left: 21px; }
+
+  /* ---------- 제작자 표시 (★ 추가) ---------- */
+  .credit { text-align: center; color: var(--muted); font-size: 12px; padding: 28px 0 24px; line-height: 1.6; }
+  .credit b { font-weight: 700; color: var(--muted); }
+
+  /* ---------- 앱 잠금 화면 (★ 추가) ---------- */
+  .lock-screen {
+    position: fixed; inset: 0; z-index: 100; background: var(--bg);
+    display: none; align-items: flex-start; justify-content: center;
+    padding-top: calc(env(safe-area-inset-top) + 8vh);
+  }
+  .lock-screen.show { display: flex; }
+  .lock-inner { width: 100%; max-width: 320px; padding: 0 24px; text-align: center; }
+  .lock-emo { font-size: 34px; margin-bottom: 14px; }
+  .lock-title { font-size: 19px; font-weight: 800; letter-spacing: -.3px; }
+  .lock-sub { font-size: 13.5px; color: var(--muted); margin-top: 6px; min-height: 18px; }
+  .lock-sub.err { color: var(--expense); font-weight: 600; }
+  .pin-dots { display: flex; justify-content: center; gap: 18px; margin: 28px 0 34px; }
+  .pin-dots .dot { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--muted); box-sizing: border-box; transition: background .1s; }
+  .pin-dots .dot.on { background: var(--accent); border-color: var(--accent); }
+  .pin-dots.shake { animation: shake .4s; }
+  @keyframes shake { 0%,100%{transform:none} 20%,60%{transform:translateX(-9px)} 40%,80%{transform:translateX(9px)} }
+  .keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px 22px; max-width: 280px; margin: 0 auto; }
+  .keypad .key {
+    height: 66px; border-radius: 50%; font-size: 26px; font-weight: 600; color: var(--ink);
+    background: var(--card); box-shadow: var(--shadow);
+  }
+  .keypad .key:active { background: var(--card-2); }
+  .keypad .key.fn { background: transparent; box-shadow: none; font-size: 22px; color: var(--muted); font-weight: 600; }
+  .keypad .key.blank { visibility: hidden; }
+  .lock-cancel { margin-top: 28px; color: var(--muted); font-size: 15px; font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="app">
+  <main>
+    <!-- ============ 1) 내역 탭 ============ -->
+    <section class="view active" id="view-ledger">
+      <div class="topbar">
+        <h1>가계부</h1>
+      </div>
+      <div class="month-nav">
+        <button data-mv="-1" aria-label="이전 달">‹</button>
+        <div class="label num" id="ledger-month">2026년 7월</div>
+        <button data-mv="1" aria-label="다음 달">›</button>
+      </div>
+
+      <!-- 이번 달 요약 히어로 카드 -->
+      <div class="card summary">
+        <div class="row">
+          <div class="cell">
+            <div class="cap">수입</div>
+            <div class="val in num" id="sum-income">₩0</div>
+          </div>
+          <div class="cell">
+            <div class="cap">지출</div>
+            <div class="val out num" id="sum-expense">₩0</div>
+          </div>
+          <div class="cell">
+            <div class="cap">잔액</div>
+            <div class="val num" id="sum-balance">₩0</div>
+          </div>
+        </div>
+        <hr class="divider">
+        <div class="budget-block" id="ledger-budget"><!-- JS로 채움 --></div>
+      </div>
+
+      <div id="ledger-fixed"><!-- ★ 추가: 고정지출 칸 (JS로 채움) --></div>
+      <div id="ledger-list"><!-- 거래내역 JS로 채움 --></div>
+    </section>
+
+    <!-- ============ 2) 통계 탭 ============ -->
+    <section class="view" id="view-stats">
+      <div class="topbar"><h1>통계</h1></div>
+      <div class="month-nav">
+        <button data-mv="-1">‹</button>
+        <div class="label num" id="stats-month">2026년 7월</div>
+        <button data-mv="1">›</button>
+      </div>
+      <div class="stat-toggle">
+        <button class="on" data-stat="expense">지출</button>
+        <button data-stat="income">수입</button>
+      </div>
+      <div id="stats-body"><!-- JS로 채움 --></div>
+    </section>
+
+    <!-- ============ 3) 예산 탭 ============ -->
+    <section class="view" id="view-budget">
+      <div class="topbar"><h1>예산</h1></div>
+      <div class="month-nav">
+        <button data-mv="-1">‹</button>
+        <div class="label num" id="budget-month">2026년 7월</div>
+        <button data-mv="1">›</button>
+      </div>
+
+      <div class="card budget-total-card">
+        <div class="lab">이번 달 전체 예산</div>
+        <div class="amount-edit">
+          <span class="won">₩</span>
+          <input class="num" id="budget-total-input" inputmode="numeric" placeholder="0">
+        </div>
+        <div class="gauge"><i id="budget-total-gauge"></i></div>
+        <div class="budget-hint num" id="budget-total-hint">예산을 입력하면 지출 진행률이 표시돼요.</div>
+      </div>
+
+      <div class="section-title">카테고리별 예산 (선택)</div>
+      <div class="card" id="cat-budget-list"><!-- JS로 채움 --></div>
+      <div style="height:24px"></div>
+    </section>
+
+    <!-- ============ 법카 탭 (★ 추가) ============ -->
+    <section class="view" id="view-corp">
+      <div class="topbar"><h1>법카</h1></div>
+      <div class="month-nav">
+        <button data-mv="-1" aria-label="이전 달">‹</button>
+        <div class="label num" id="corp-month">2026년 7월</div>
+        <button data-mv="1" aria-label="다음 달">›</button>
+      </div>
+
+      <div class="card summary">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <span class="cap">월 사용 한도 (매월 1일 초기화)</span>
+          <span style="display:flex;align-items:center;gap:2px">
+            <span style="color:var(--muted);font-weight:800;font-size:15px">₩</span>
+            <input class="num" id="corp-limit-input" inputmode="numeric" placeholder="50,000"
+                   style="width:92px;text-align:right;border:none;background:transparent;color:var(--ink);font-size:16px;font-weight:800;outline:none">
+          </span>
+        </div>
+        <div class="cap">남은 잔액</div>
+        <div class="num" id="corp-left" style="font-size:31px;font-weight:800;letter-spacing:-.6px;color:var(--income);margin-top:2px">₩50,000</div>
+        <div class="gauge" style="margin-top:16px"><i id="corp-gauge"></i></div>
+        <div class="budget-hint num" id="corp-usage">₩0 / ₩50,000 사용 (0%)</div>
+      </div>
+
+      <div id="corp-list"><!-- 사용 내역 JS로 채움 --></div>
+    </section>
+
+    <!-- ============ 4) 설정 탭 (★ 추가) ============ -->
+    <section class="view" id="view-settings">
+      <div class="topbar"><h1>설정</h1></div>
+
+      <div class="section-title">앱 설치</div>
+      <div class="data-btns">
+        <button class="data-btn" id="btn-install">홈 화면에 추가 <span class="chev">›</span></button>
+      </div>
+
+      <div class="section-title">보안</div>
+      <div class="data-btns">
+        <div class="data-btn" id="lock-row">
+          <span>앱 잠금 (4자리 비밀번호)</span>
+          <span class="switch" id="lock-switch"><i></i></span>
+        </div>
+        <button class="data-btn" id="btn-change-pin" style="display:none">비밀번호 변경 <span class="chev">›</span></button>
+      </div>
+
+      <div class="section-title">데이터 관리</div>
+      <div class="data-btns">
+        <button class="data-btn" id="btn-export">백업 내보내기 <span class="chev">›</span></button>
+        <button class="data-btn" id="btn-import">백업 불러오기 <span class="chev">›</span></button>
+        <button class="data-btn danger" id="btn-reset">전체 초기화 <span class="chev">›</span></button>
+      </div>
+      <input type="file" id="import-file" accept="application/json" style="display:none">
+
+      <div class="section-title">업데이트</div>
+      <div class="data-btns">
+        <button class="data-btn" id="btn-update">
+          <span>업데이트 확인</span>
+          <span class="chev num" id="app-version">v1.0</span>
+        </button>
+      </div>
+
+      <div class="credit" id="credit"><!-- ★ 제작자 표시 (JS로 채움) --></div>
+    </section>
+  </main>
+
+  <!-- 하단 탭바 -->
+  <nav class="tabbar">
+    <button class="tab on" data-tab="ledger"><span class="ic">📓</span>내역</button>
+    <button class="tab" data-tab="stats"><span class="ic">📊</span>통계</button>
+    <button class="tab" data-tab="budget"><span class="ic">🎯</span>예산</button>
+    <button class="tab" data-tab="corp"><span class="ic">💳</span>법카</button>
+    <button class="tab" data-tab="settings"><span class="ic">⚙️</span>설정</button>
+  </nav>
+
+  <!-- 추가 버튼 -->
+  <button class="fab" id="fab" aria-label="내역 추가">+</button>
+
+  <!-- 입력 바텀시트 -->
+  <div class="backdrop" id="backdrop"></div>
+  <div class="sheet" id="sheet">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <button class="cancel" id="sheet-cancel">취소</button>
+      <div class="title" id="sheet-title">내역 추가</div>
+      <button class="save" id="sheet-save">저장</button>
+    </div>
+
+    <div class="type-toggle">
+      <button id="tt-expense" class="on-out">지출</button>
+      <button id="tt-income">수입</button>
+    </div>
+
+    <div class="amt-input-row">
+      <span class="won">₩</span>
+      <input id="amt-input" class="num" inputmode="numeric" placeholder="0">
+    </div>
+
+    <div class="field-label">카테고리</div>
+    <div class="chips" id="cat-chips"></div>
+
+    <div class="field">
+      <div class="field-row">
+        <span class="k">날짜</span>
+        <input type="date" id="date-input">
+      </div>
+      <div class="field-row" style="border-top:1px solid var(--line)">
+        <span class="k">메모</span>
+        <input type="text" id="memo-input" placeholder="선택 입력" maxlength="40">
+      </div>
+    </div>
+
+    <button class="save-btn" id="big-save">저장하기</button>
+    <button class="delete-btn" id="big-delete" style="display:none">이 내역 삭제</button>
+  </div>
+
+  <!-- ★ 추가: 고정지출 입력 바텀시트 -->
+  <div class="backdrop" id="fixed-backdrop"></div>
+  <div class="sheet" id="fixed-sheet">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <button class="cancel" id="fx-cancel">취소</button>
+      <div class="title" id="fx-title">고정지출 추가</div>
+      <button class="save" id="fx-save">저장</button>
+    </div>
+
+    <div class="amt-input-row">
+      <span class="won">₩</span>
+      <input id="fx-amt" class="num" inputmode="numeric" placeholder="0">
+    </div>
+
+    <div class="field">
+      <div class="field-row">
+        <span class="k">항목명</span>
+        <input type="text" id="fx-name" placeholder="예: 월세, 넷플릭스" maxlength="20">
+      </div>
+      <div class="field-row" style="border-top:1px solid var(--line)">
+        <span class="k">결제일</span>
+        <select id="fx-day"></select>
+      </div>
+    </div>
+
+    <div class="field-label">카테고리</div>
+    <div class="chips" id="fx-chips"></div>
+
+    <button class="save-btn exp" id="fx-big-save">저장하기</button>
+    <button class="delete-btn" id="fx-delete" style="display:none">이 고정지출 삭제</button>
+  </div>
+
+  <!-- ★ 추가: 법카 사용 입력 시트 -->
+  <div class="backdrop" id="corp-backdrop"></div>
+  <div class="sheet" id="corp-sheet">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <button class="cancel" id="corp-cancel">취소</button>
+      <div class="title" id="corp-title">법카 사용 추가</div>
+      <button class="save" id="corp-save">저장</button>
+    </div>
+    <div class="amt-input-row">
+      <span class="won">₩</span>
+      <input id="corp-amt" class="num" inputmode="numeric" placeholder="0">
+    </div>
+    <div class="field">
+      <div class="field-row">
+        <span class="k">항목</span>
+        <input type="text" id="corp-item" placeholder="예: 커피, 과자, 음료" maxlength="30">
+      </div>
+      <div class="field-row" style="border-top:1px solid var(--line)">
+        <span class="k">날짜</span>
+        <input type="date" id="corp-date">
+      </div>
+    </div>
+    <button class="save-btn" id="corp-big-save">저장하기</button>
+    <button class="delete-btn" id="corp-delete" style="display:none">이 항목 삭제</button>
+  </div>
+
+  <!-- ★ 추가: 홈 화면 추가 안내 시트 -->
+  <div class="backdrop" id="install-backdrop"></div>
+  <div class="sheet" id="install-sheet">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <button class="cancel" id="install-cancel">닫기</button>
+      <div class="title">홈 화면에 추가</div>
+      <span style="width:32px"></span>
+    </div>
+    <div id="install-steps" style="padding:4px 6px 14px;font-size:14.5px;line-height:2;color:var(--ink)"></div>
+  </div>
+
+  <!-- ★ 추가: 앱 잠금 화면 -->
+  <div class="lock-screen" id="lock-screen">
+    <div class="lock-inner">
+      <div class="lock-emo">🔒</div>
+      <div class="lock-title" id="lock-title">비밀번호 입력</div>
+      <div class="lock-sub" id="lock-sub">&nbsp;</div>
+      <div class="pin-dots" id="pin-dots"></div>
+      <div class="keypad" id="keypad"></div>
+      <button class="lock-cancel" id="lock-cancel" style="visibility:hidden">취소</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+"use strict";
+/* =====================================================================
+   가계부 앱 로직 (순수 바닐라 JS)
+   - 데이터는 localStorage('gagyebu_v1')에 저장 → 아이폰 홈화면 앱에서 유지됨
+   - 저장이 막힌 환경(샌드박스 등)에서는 메모리에만 유지되도록 예외처리
+   ===================================================================== */
+
+/* ---------- 카테고리 정의 (이모지 아이콘 + 통계 색) ---------- */
+const CATS = {
+  expense: [
+    { name: '식비',       emo: '🍚', color: '#D84C3E' },
+    { name: '카페/간식',  emo: '☕', color: '#E8973A' },
+    { name: '생활용품',   emo: '🧻', color: '#E0B84A' },
+    { name: '교통',       emo: '🚌', color: '#5AA469' },
+    { name: '주거/통신',  emo: '🏠', color: '#0D7C66' },
+    { name: '쇼핑',       emo: '🛍️', color: '#3A9EA5' },
+    { name: '의료/건강',  emo: '💊', color: '#4A79C4' },
+    { name: '문화/여가',  emo: '🎬', color: '#7A6BD1' },
+    { name: '교육',       emo: '📚', color: '#B85EA8' },
+    { name: '경조사',     emo: '🎁', color: '#C86A8E' },
+    { name: '기타',       emo: '📦', color: '#8A9691' },
+  ],
+  income: [
+    { name: '급여',       emo: '💰', color: '#0D7C66' },
+    { name: '용돈',       emo: '🎀', color: '#3A9EA5' },
+    { name: '부수입',     emo: '💵', color: '#5AA469' },
+    { name: '금융수입',   emo: '📈', color: '#4A79C4' },
+    { name: '기타',       emo: '📦', color: '#8A9691' },
+  ],
+};
+function catInfo(type, name) {
+  return CATS[type].find(c => c.name === name) || { name, emo: '📦', color: '#8A9691' };
+}
+
+/* ---------- 저장소 (localStorage + IndexedDB 이중 저장) ----------
+   iOS 홈화면 앱은 localStorage를 비교적 쉽게 비워버리기 때문에,
+   잘 지워지지 않는 IndexedDB에도 함께 저장하고, 비었을 때 자동 복구한다. */
+const KEY = 'gagyebu_v1';
+let data = { transactions: [], budget: { total: {}, cats: {} }, fixed: [] }; // fixed = 고정지출 목록
+
+function normalizeData() {
+  if (!data.transactions) data.transactions = [];
+  if (!data.budget) data.budget = { total: {}, cats: {} };
+  if (!data.budget.total) data.budget.total = {};
+  if (!data.budget.cats) data.budget.cats = {};
+  if (!data.fixed) data.fixed = [];
+  if (!data.corp) data.corp = { limit: 50000, entries: [] };   // ★ 추가: 법카(월 한도 + 사용 내역)
+  if (!data.corp.entries) data.corp.entries = [];
+}
+function load() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) data = JSON.parse(raw);
+  } catch (e) { console.warn('불러오기 실패, 메모리로 시작', e); }
+  normalizeData();
+}
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {}
+  idbSet(KEY, data);   // ★ 내구성 있는 백업 (비동기, 실패해도 무시)
+}
+
+/* ---------- IndexedDB 헬퍼 (★ 추가) ---------- */
+const IDB_NAME = 'gagyebu', IDB_STORE = 'kv';
+function idbOpen() {
+  return new Promise((res, rej) => {
+    let r;
+    try { r = indexedDB.open(IDB_NAME, 1); } catch (e) { return rej(e); }
+    r.onupgradeneeded = () => { try { r.result.createObjectStore(IDB_STORE); } catch (e) {} };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function idbSet(k, v) {
+  try {
+    const db = await idbOpen();
+    await new Promise((res, rej) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(JSON.parse(JSON.stringify(v)), k);
+      tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+    });
+  } catch (e) {}
+}
+async function idbGet(k) {
+  try {
+    const db = await idbOpen();
+    return await new Promise((res, rej) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const rq = tx.objectStore(IDB_STORE).get(k);
+      rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
+    });
+  } catch (e) { return undefined; }
+}
+// 시작 시: localStorage가 비었는데 IndexedDB에 내역이 있으면 복구
+async function recoverFromIDB() {
+  try {
+    const hasLocal = data.transactions && data.transactions.length > 0;
+    const backup = await idbGet(KEY);
+    const backupHas = backup && backup.transactions && backup.transactions.length > 0;
+    if (!hasLocal && backupHas) {
+      data = backup; normalizeData();
+      try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {}
+      renderAll();
+      toast('저장된 내역을 복구했어요');
+    } else if (hasLocal) {
+      idbSet(KEY, data);   // localStorage 데이터를 IDB에도 확실히 동기화
+    }
+  } catch (e) {}
+}
+
+/* ---------- 유틸 ---------- */
+const won = n => '₩' + Math.round(n || 0).toLocaleString('ko-KR');
+const pad = n => String(n).padStart(2, '0');
+const ymKey = (y, m) => `${y}-${pad(m + 1)}`;                 // m: 0~11
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
+function parseNum(str) { return parseInt(String(str).replace(/[^\d]/g, ''), 10) || 0; }
+function formatInput(str) { const n = parseNum(str); return n ? n.toLocaleString('ko-KR') : ''; }
+
+/* ---------- 화면 상태 ---------- */
+const now = new Date();
+const state = {
+  tab: 'ledger',
+  year: now.getFullYear(),
+  month: now.getMonth(),   // 0~11
+  statType: 'expense',
+  // 입력시트 편집 상태
+  editId: null,
+  formType: 'expense',
+  formCat: null,
+};
+
+function monthLabel() { return `${state.year}년 ${state.month + 1}월`; }
+function txInMonth() {
+  const k = ymKey(state.year, state.month);
+  return data.transactions.filter(t => t.date && t.date.slice(0, 7) === k);
+}
+// ★ 추가: 현재 보고 있는 달에 적용되는 고정지출을 '가상 거래'로 생성
+//         (실제로 저장하진 않고, 렌더링할 때마다 달에 맞춰 만들어 냄 → 매월 자동 반영)
+function activeFixed() {
+  const ym = ymKey(state.year, state.month);
+  return data.fixed.filter(f => !f.since || f.since <= ym); // 등록한 달부터 매월 적용
+}
+function monthFixedTx() {
+  const ym = ymKey(state.year, state.month);
+  const lastDay = new Date(state.year, state.month + 1, 0).getDate(); // 이 달의 마지막 날
+  return activeFixed().map(f => ({
+    id: 'fix-' + f.id, fixedId: f.id, type: 'expense',
+    amount: f.amount, category: f.category, memo: '고정지출', fixed: true,
+    date: `${ym}-${pad(Math.min(f.day || 1, lastDay))}`,
+  }));
+}
+function fixedTotal() { return activeFixed().reduce((a, f) => a + f.amount, 0); }
+function moveMonth(dir) {
+  state.month += dir;
+  if (state.month < 0) { state.month = 11; state.year--; }
+  if (state.month > 11) { state.month = 0; state.year++; }
+  renderAll();
+}
+
+/* =====================================================================
+   렌더링
+   ===================================================================== */
+function renderAll() {
+  document.getElementById('ledger-month').textContent = monthLabel();
+  document.getElementById('stats-month').textContent = monthLabel();
+  document.getElementById('budget-month').textContent = monthLabel();
+  document.getElementById('corp-month').textContent = monthLabel();   // ★ 법카
+  renderLedger();
+  renderStats();
+  renderBudget();
+  renderCorp();   // ★ 법카
+}
+
+/* ---------- 고정지출 칸 (★ 추가) ---------- */
+function renderLedgerFixed() {
+  const active = activeFixed();
+  const total = active.reduce((a, f) => a + f.amount, 0);
+
+  const items = active
+    .slice()
+    .sort((a, b) => (a.day || 1) - (b.day || 1))
+    .map(f => {
+      const info = catInfo('expense', f.category);
+      return `
+        <div class="tx" data-fixed-id="${f.id}">
+          <div class="emo">${info.emo}</div>
+          <div class="body">
+            <div class="cat">${escapeHtml(f.name)}</div>
+            <div class="memo">매월 ${f.day || 1}일 · ${escapeHtml(f.category)}</div>
+          </div>
+          <div class="amt num out">-${won(f.amount)}</div>
+        </div>`;
+    }).join('');
+
+  document.getElementById('ledger-fixed').innerHTML = `
+    <div class="day-head">
+      <span class="d">📌 고정지출</span>
+      ${total ? `<span class="sum num">매월 -${won(total)}</span>` : ''}
+    </div>
+    <div class="card tx-list">
+      ${items}
+      <button class="add-fixed" id="add-fixed">+ 고정지출 추가</button>
+    </div>`;
+}
+
+/* ---------- 내역 탭 ---------- */
+function renderLedger() {
+  renderLedgerFixed(); // ★ 추가: 상단 고정지출 칸 먼저 그리기
+  const txs = txInMonth();
+  const income = txs.filter(t => t.type === 'income').reduce((a, t) => a + t.amount, 0);
+  // ★ 추가: 지출 합계 = 변동지출 + 고정지출
+  const expense = txs.filter(t => t.type === 'expense').reduce((a, t) => a + t.amount, 0)
+                  + fixedTotal();
+
+  document.getElementById('sum-income').textContent = won(income);
+  document.getElementById('sum-expense').textContent = won(expense);
+  document.getElementById('sum-balance').textContent = won(income - expense);
+
+  // 예산 게이지
+  const total = data.budget.total[ymKey(state.year, state.month)] || 0;
+  const bEl = document.getElementById('ledger-budget');
+  if (total > 0) {
+    const ratio = expense / total;
+    const pct = Math.min(ratio * 100, 100);
+    const color = ratio > 1 ? 'var(--expense)' : ratio > 0.75 ? 'var(--amber)' : 'var(--accent)';
+    const left = total - expense;
+    bEl.innerHTML = `
+      <div class="gtop">
+        <span class="t">이번 달 예산</span>
+        <span class="r num" style="color:${left < 0 ? 'var(--expense)' : 'var(--ink)'}">
+          ${left < 0 ? '초과 ' + won(-left) : won(left) + ' 남음'}
+        </span>
+      </div>
+      <div class="gauge"><i style="width:${pct}%;background:${color}"></i></div>
+      <div class="budget-hint num">${won(expense)} / ${won(total)} 사용 (${Math.round(ratio*100)}%)</div>`;
+  } else {
+    bEl.innerHTML = `<div class="budget-hint">예산 미설정 · <span class="set-budget-link" id="go-budget">예산 설정하기</span></div>`;
+  }
+
+  // 거래내역 (날짜별 그룹)
+  const list = document.getElementById('ledger-list');
+  if (txs.length === 0) {
+    list.innerHTML = `
+      <div class="empty">
+        <div class="big">🧾</div>
+        <div class="t">이번 달 내역이 없어요</div>
+        <div class="s">아래 + 버튼으로 첫 내역을 추가해 보세요</div>
+      </div>`;
+    return;
+  }
+  const byDay = {};
+  txs.forEach(t => { (byDay[t.date] = byDay[t.date] || []).push(t); });
+  const days = Object.keys(byDay).sort().reverse();
+
+  list.innerHTML = days.map(day => {
+    const items = byDay[day].slice().sort((a, b) => (b.id) - (a.id));
+    const dObj = new Date(day + 'T00:00:00');
+    const wk = ['일','월','화','수','목','금','토'][dObj.getDay()];
+    const dInc = items.filter(t=>t.type==='income').reduce((a,t)=>a+t.amount,0);
+    const dExp = items.filter(t=>t.type==='expense').reduce((a,t)=>a+t.amount,0);
+    const parts = [];
+    if (dInc) parts.push(`<span style="color:var(--income)">+${won(dInc)}</span>`);
+    if (dExp) parts.push(`<span>-${won(dExp)}</span>`);
+
+    const rows = items.map(t => {
+      const info = catInfo(t.type, t.category);
+      const sign = t.type === 'income' ? '+' : '-';
+      return `
+        <div class="tx" data-id="${t.id}">
+          <div class="emo">${info.emo}</div>
+          <div class="body">
+            <div class="cat">${escapeHtml(t.category)}</div>
+            ${t.memo ? `<div class="memo">${escapeHtml(t.memo)}</div>` : ''}
+          </div>
+          <div class="amt num ${t.type==='income'?'in':'out'}">${sign}${won(t.amount)}</div>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="day-group">
+        <div class="day-head">
+          <span class="d">${dObj.getMonth()+1}월 ${dObj.getDate()}일 (${wk})</span>
+          <span class="sum num">${parts.join('&nbsp;&nbsp;')}</span>
+        </div>
+        <div class="card tx-list">${rows}</div>
+      </div>`;
+  }).join('');
+}
+
+/* ---------- 통계 탭 ---------- */
+function renderStats() {
+  const type = state.statType;
+  // ★ 추가: 지출 통계에는 고정지출도 합산
+  const txs = txInMonth().filter(t => t.type === type)
+    .concat(type === 'expense' ? monthFixedTx() : []);
+  const body = document.getElementById('stats-body');
+  const total = txs.reduce((a, t) => a + t.amount, 0);
+
+  if (total === 0) {
+    body.innerHTML = `
+      <div class="empty">
+        <div class="big">📊</div>
+        <div class="t">표시할 ${type==='expense'?'지출':'수입'}이 없어요</div>
+        <div class="s">내역을 추가하면 카테고리별 분석이 나와요</div>
+      </div>`;
+    return;
+  }
+
+  // 카테고리별 합계
+  const byCat = {};
+  txs.forEach(t => { byCat[t.category] = (byCat[t.category] || 0) + t.amount; });
+  const rows = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+
+  // SVG 도넛 (stroke-dasharray로 세그먼트 그리기)
+  const R = 70, C = 2 * Math.PI * R;
+  let offset = 0;
+  const segs = rows.map(([name, amt]) => {
+    const frac = amt / total;
+    const info = catInfo(type, name);
+    const seg = `<circle r="${R}" cx="95" cy="95" fill="none" stroke="${info.color}"
+        stroke-width="26" stroke-dasharray="${(frac*C).toFixed(2)} ${C.toFixed(2)}"
+        stroke-dashoffset="${(-offset*C).toFixed(2)}"
+        transform="rotate(-90 95 95)"/>`;
+    offset += frac;
+    return seg;
+  }).join('');
+
+  const legend = rows.map(([name, amt]) => {
+    const info = catInfo(type, name);
+    const pct = Math.round(amt / total * 100);
+    return `
+      <div class="cat-line">
+        <span class="dot" style="background:${info.color}"></span>
+        <span class="nm">${info.emo} ${escapeHtml(name)}</span>
+        <span class="pct num">${pct}%</span>
+        <span class="mo num">${won(amt)}</span>
+      </div>`;
+  }).join('');
+
+  body.innerHTML = `
+    <div class="card">
+      <div class="donut-wrap">
+        <div class="donut">
+          <svg width="190" height="190" viewBox="0 0 190 190">${segs}</svg>
+          <div class="center">
+            <div>
+              <div class="cap">${type==='expense'?'총 지출':'총 수입'}</div>
+              <div class="big num">${won(total)}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="padding:6px 18px 14px">${legend}</div>
+    </div>`;
+}
+
+/* ---------- 예산 탭 ---------- */
+function renderBudget() {
+  const ym = ymKey(state.year, state.month);
+  // ★ 추가: 예산 사용액 = 변동지출 + 고정지출
+  const expense = txInMonth().filter(t => t.type === 'expense')
+                             .reduce((a, t) => a + t.amount, 0) + fixedTotal();
+  const total = data.budget.total[ym] || 0;
+
+  // 전체 예산 입력값
+  const input = document.getElementById('budget-total-input');
+  if (document.activeElement !== input) input.value = total ? total.toLocaleString('ko-KR') : '';
+
+  // 전체 게이지
+  const g = document.getElementById('budget-total-gauge');
+  const hint = document.getElementById('budget-total-hint');
+  if (total > 0) {
+    const ratio = expense / total;
+    const color = ratio > 1 ? 'var(--expense)' : ratio > 0.75 ? 'var(--amber)' : 'var(--accent)';
+    g.style.width = Math.min(ratio * 100, 100) + '%';
+    g.style.background = color;
+    hint.textContent = `${won(expense)} 사용 · ${total - expense >= 0 ? won(total-expense)+' 남음' : won(expense-total)+' 초과'}`;
+  } else {
+    g.style.width = '0%';
+    hint.textContent = '예산을 입력하면 지출 진행률이 표시돼요.';
+  }
+
+  // 카테고리별 예산 — 지출 카테고리 전체 표시
+  const catBudgets = data.budget.cats[ym] || {};
+  const spentByCat = {};
+  txInMonth().filter(t => t.type === 'expense').concat(monthFixedTx()) // ★ 추가: 고정지출 포함
+             .forEach(t => { spentByCat[t.category] = (spentByCat[t.category]||0) + t.amount; });
+
+  const wrap = document.getElementById('cat-budget-list');
+  wrap.innerHTML = CATS.expense.map(c => {
+    const b = catBudgets[c.name] || 0;
+    const spent = spentByCat[c.name] || 0;
+    const ratio = b > 0 ? spent / b : 0;
+    const color = ratio > 1 ? 'var(--expense)' : ratio > 0.75 ? 'var(--amber)' : 'var(--accent)';
+    const fig = b > 0
+      ? `${won(spent)} / ${won(b)}`
+      : (spent > 0 ? `${won(spent)} 사용 · 예산 없음` : '예산 없음');
+    return `
+      <div class="catbudget">
+        <div class="emo">${c.emo}</div>
+        <div class="cb-body">
+          <div class="cb-top">
+            <span class="cb-nm">${c.name}</span>
+            <span class="cb-fig num">${fig}</span>
+          </div>
+          <div class="mini-gauge"><i style="width:${Math.min(ratio*100,100)}%;background:${color}"></i></div>
+        </div>
+        <input class="cbinput num" inputmode="numeric" data-cat="${c.name}"
+               placeholder="0" value="${b ? b.toLocaleString('ko-KR') : ''}">
+      </div>`;
+  }).join('');
+
+  // 카테고리 예산 입력 이벤트
+  wrap.querySelectorAll('.cbinput').forEach(inp => {
+    inp.addEventListener('input', () => { inp.value = formatInput(inp.value); });
+    inp.addEventListener('change', () => {
+      if (!data.budget.cats[ym]) data.budget.cats[ym] = {};
+      const v = parseNum(inp.value);
+      if (v > 0) data.budget.cats[ym][c_name(inp)] = v;
+      else delete data.budget.cats[ym][c_name(inp)];
+      save(); renderBudget();
+    });
+  });
+  function c_name(inp){ return inp.getAttribute('data-cat'); }
+}
+
+/* =====================================================================
+   입력 바텀시트
+   ===================================================================== */
+const sheet = document.getElementById('sheet');
+const backdrop = document.getElementById('backdrop');
+
+function openSheet(tx) {
+  // tx가 있으면 편집, 없으면 새 내역
+  state.editId = tx ? tx.id : null;
+  state.formType = tx ? tx.type : 'expense';
+  state.formCat = tx ? tx.category : null;
+
+  document.getElementById('sheet-title').textContent = tx ? '내역 수정' : '내역 추가';
+  document.getElementById('amt-input').value = tx ? tx.amount.toLocaleString('ko-KR') : '';
+  document.getElementById('date-input').value = tx ? tx.date : today();
+  document.getElementById('memo-input').value = tx ? (tx.memo || '') : '';
+  document.getElementById('big-delete').style.display = tx ? 'block' : 'none';
+
+  applyType(state.formType);
+  renderChips();
+
+  backdrop.classList.add('open');
+  requestAnimationFrame(() => sheet.classList.add('open'));
+}
+function closeSheet() {
+  sheet.classList.remove('open');
+  backdrop.classList.remove('open');
+  document.activeElement && document.activeElement.blur();
+}
+
+function applyType(type) {
+  state.formType = type;
+  const exp = document.getElementById('tt-expense');
+  const inc = document.getElementById('tt-income');
+  exp.className = type === 'expense' ? 'on-out' : '';
+  inc.className = type === 'income' ? 'on-in' : '';
+  // 카테고리가 새 타입에 없으면 초기화
+  if (!CATS[type].some(c => c.name === state.formCat)) state.formCat = null;
+  // 저장 버튼 색
+  const bs = document.getElementById('big-save');
+  bs.className = 'save-btn' + (type === 'expense' ? ' exp' : '');
+  renderChips();
+}
+
+function renderChips() {
+  const wrap = document.getElementById('cat-chips');
+  wrap.innerHTML = CATS[state.formType].map(c => `
+    <button class="chip ${state.formCat===c.name ? (state.formType==='expense'?'on exp':'on') : ''}" data-cat="${c.name}">
+      <span class="e">${c.emo}</span>${c.name}
+    </button>`).join('');
+  wrap.querySelectorAll('.chip').forEach(ch => {
+    ch.addEventListener('click', () => { state.formCat = ch.getAttribute('data-cat'); renderChips(); });
+  });
+}
+
+function saveTx() {
+  const amount = parseNum(document.getElementById('amt-input').value);
+  if (amount <= 0) { toast('금액을 입력해 주세요'); return; }
+  if (!state.formCat) { toast('카테고리를 선택해 주세요'); return; }
+
+  const record = {
+    id: state.editId || Date.now(),
+    type: state.formType,
+    amount,
+    category: state.formCat,
+    memo: document.getElementById('memo-input').value.trim(),
+    date: document.getElementById('date-input').value || today(),
+  };
+
+  if (state.editId) {
+    const i = data.transactions.findIndex(t => t.id === state.editId);
+    if (i >= 0) data.transactions[i] = record;
+  } else {
+    data.transactions.push(record);
+  }
+  save();
+  // 저장한 내역의 달로 이동해서 보여주기
+  const d = new Date(record.date + 'T00:00:00');
+  state.year = d.getFullYear(); state.month = d.getMonth();
+  closeSheet();
+  renderAll();
+  toast(state.editId ? '수정했어요' : '저장했어요');
+}
+
+function deleteTx() {
+  if (!state.editId) return;
+  data.transactions = data.transactions.filter(t => t.id !== state.editId);
+  save(); closeSheet(); renderAll(); toast('삭제했어요');
+}
+
+/* =====================================================================
+   고정지출 시트 (★ 추가)
+   ===================================================================== */
+const fxSheet = document.getElementById('fixed-sheet');
+const fxBackdrop = document.getElementById('fixed-backdrop');
+let fxEditId = null;   // 수정 중인 고정지출 id (없으면 새로 추가)
+let fxCat = null;      // 선택된 카테고리
+
+function openFixed(f) {
+  fxEditId = f ? f.id : null;
+  fxCat = f ? f.category : null;
+  document.getElementById('fx-title').textContent = f ? '고정지출 수정' : '고정지출 추가';
+  document.getElementById('fx-amt').value = f ? f.amount.toLocaleString('ko-KR') : '';
+  document.getElementById('fx-name').value = f ? f.name : '';
+  document.getElementById('fx-day').value = f ? (f.day || 1) : 1;
+  document.getElementById('fx-delete').style.display = f ? 'block' : 'none';
+  renderFxChips();
+  fxBackdrop.classList.add('open');
+  requestAnimationFrame(() => fxSheet.classList.add('open'));
+}
+function closeFixed() {
+  fxSheet.classList.remove('open');
+  fxBackdrop.classList.remove('open');
+  document.activeElement && document.activeElement.blur();
+}
+function renderFxChips() {
+  const wrap = document.getElementById('fx-chips');
+  wrap.innerHTML = CATS.expense.map(c => `
+    <button class="chip ${fxCat===c.name ? 'on exp' : ''}" data-cat="${c.name}">
+      <span class="e">${c.emo}</span>${c.name}
+    </button>`).join('');
+  wrap.querySelectorAll('.chip').forEach(ch =>
+    ch.addEventListener('click', () => { fxCat = ch.getAttribute('data-cat'); renderFxChips(); }));
+}
+function saveFixed() {
+  const amount = parseNum(document.getElementById('fx-amt').value);
+  const name = document.getElementById('fx-name').value.trim();
+  const day = parseInt(document.getElementById('fx-day').value, 10) || 1;
+  if (amount <= 0) { toast('금액을 입력해 주세요'); return; }
+  if (!name) { toast('항목명을 입력해 주세요'); return; }
+  if (!fxCat) { toast('카테고리를 선택해 주세요'); return; }
+
+  if (fxEditId) {
+    const i = data.fixed.findIndex(f => f.id === fxEditId);
+    if (i >= 0) data.fixed[i] = { ...data.fixed[i], name, amount, category: fxCat, day };
+  } else {
+    // since = 지금 보고 있는 달 → 그 달부터 매월 자동 적용
+    data.fixed.push({ id: Date.now(), name, amount, category: fxCat, day, since: ymKey(state.year, state.month) });
+  }
+  save(); closeFixed(); renderAll();
+  toast(fxEditId ? '수정했어요' : '고정지출을 추가했어요');
+}
+function deleteFixed() {
+  if (!fxEditId) return;
+  if (!confirm('이 고정지출을 삭제할까요? 모든 달에서 사라져요.')) return;
+  data.fixed = data.fixed.filter(f => f.id !== fxEditId);
+  save(); closeFixed(); renderAll(); toast('삭제했어요');
+}
+
+/* =====================================================================
+   법카 탭 (★ 추가)
+   - 개인 가계부와 완전히 분리된 별도 기록
+   - 월 한도(기본 5만) 안에서 일별 사용 내역 + 남은 잔액 표시
+   ===================================================================== */
+function corpInMonth() {
+  const k = ymKey(state.year, state.month);
+  return (data.corp.entries || []).filter(e => e.date && e.date.slice(0, 7) === k);
+}
+function renderCorp() {
+  const limit = data.corp.limit || 0;
+  const entries = corpInMonth();
+  const used = entries.reduce((a, e) => a + e.amount, 0);
+  const left = limit - used;
+
+  // 한도 입력값
+  const li = document.getElementById('corp-limit-input');
+  if (document.activeElement !== li) li.value = limit ? limit.toLocaleString('ko-KR') : '';
+
+  // 남은 잔액
+  const leftEl = document.getElementById('corp-left');
+  leftEl.textContent = (left < 0 ? '-' : '') + won(Math.abs(left));
+  leftEl.style.color = left < 0 ? 'var(--expense)' : 'var(--income)';
+
+  // 게이지
+  const ratio = limit > 0 ? used / limit : 0;
+  const color = ratio > 1 ? 'var(--expense)' : ratio > 0.8 ? 'var(--amber)' : 'var(--accent)';
+  document.getElementById('corp-gauge').style.width = Math.min(ratio * 100, 100) + '%';
+  document.getElementById('corp-gauge').style.background = color;
+  document.getElementById('corp-usage').textContent =
+    `${won(used)} / ${won(limit)} 사용 (${Math.round(ratio * 100)}%)`;
+
+  // 일별 사용 내역
+  const list = document.getElementById('corp-list');
+  if (entries.length === 0) {
+    list.innerHTML = `
+      <div class="empty">
+        <div class="big">💳</div>
+        <div class="t">이번 달 법카 사용 내역이 없어요</div>
+        <div class="s">아래 + 버튼으로 사용 내역을 추가하세요</div>
+      </div>`;
+    return;
+  }
+  const byDay = {};
+  entries.forEach(e => { (byDay[e.date] = byDay[e.date] || []).push(e); });
+  const days = Object.keys(byDay).sort().reverse();
+
+  list.innerHTML = days.map(day => {
+    const items = byDay[day].slice().sort((a, b) => b.id - a.id);
+    const dObj = new Date(day + 'T00:00:00');
+    const wk = ['일','월','화','수','목','금','토'][dObj.getDay()];
+    const dSum = items.reduce((a, e) => a + e.amount, 0);
+    const rows = items.map(e => `
+      <div class="tx" data-corp-id="${e.id}">
+        <div class="emo">🧾</div>
+        <div class="body">
+          <div class="cat">${escapeHtml(e.item || '간식비')}</div>
+        </div>
+        <div class="amt num out">-${won(e.amount)}</div>
+      </div>`).join('');
+    return `
+      <div class="day-group">
+        <div class="day-head">
+          <span class="d">${dObj.getMonth()+1}월 ${dObj.getDate()}일 (${wk})</span>
+          <span class="sum num">-${won(dSum)}</span>
+        </div>
+        <div class="card tx-list">${rows}</div>
+      </div>`;
+  }).join('');
+}
+
+/* ---------- 법카 입력 시트 ---------- */
+const corpSheet = document.getElementById('corp-sheet');
+const corpBackdrop = document.getElementById('corp-backdrop');
+let corpEditId = null;
+
+function openCorp(e) {
+  corpEditId = e ? e.id : null;
+  document.getElementById('corp-title').textContent = e ? '법카 사용 수정' : '법카 사용 추가';
+  document.getElementById('corp-amt').value = e ? e.amount.toLocaleString('ko-KR') : '';
+  document.getElementById('corp-item').value = e ? (e.item || '') : '';
+  document.getElementById('corp-date').value = e ? e.date : today();
+  document.getElementById('corp-delete').style.display = e ? 'block' : 'none';
+  corpBackdrop.classList.add('open');
+  requestAnimationFrame(() => corpSheet.classList.add('open'));
+}
+function closeCorp() {
+  corpSheet.classList.remove('open');
+  corpBackdrop.classList.remove('open');
+  document.activeElement && document.activeElement.blur();
+}
+function saveCorp() {
+  const amount = parseNum(document.getElementById('corp-amt').value);
+  if (amount <= 0) { toast('금액을 입력해 주세요'); return; }
+  const rec = {
+    id: corpEditId || Date.now(),
+    amount,
+    item: document.getElementById('corp-item').value.trim(),
+    date: document.getElementById('corp-date').value || today(),
+  };
+  if (corpEditId) {
+    const i = data.corp.entries.findIndex(x => x.id === corpEditId);
+    if (i >= 0) data.corp.entries[i] = rec;
+  } else {
+    data.corp.entries.push(rec);
+  }
+  save();
+  const d = new Date(rec.date + 'T00:00:00');
+  state.year = d.getFullYear(); state.month = d.getMonth();
+  closeCorp(); renderAll(); toast(corpEditId ? '수정했어요' : '저장했어요');
+}
+function deleteCorp() {
+  if (!corpEditId) return;
+  data.corp.entries = data.corp.entries.filter(e => e.id !== corpEditId);
+  save(); closeCorp(); renderAll(); toast('삭제했어요');
+}
+
+/* =====================================================================
+   토스트
+   ===================================================================== */
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+}
+
+/* ---------- HTML 이스케이프 (메모/카테고리 안전 출력) ---------- */
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+/* =====================================================================
+   탭 전환
+   ===================================================================== */
+function switchTab(tab) {
+  state.tab = tab;
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-' + tab).classList.add('active');
+  document.querySelectorAll('.tabbar .tab').forEach(t =>
+    t.classList.toggle('on', t.getAttribute('data-tab') === tab));
+  document.getElementById('fab').style.display = (tab === 'settings') ? 'none' : 'grid'; // ★ 설정 탭에선 + 숨김
+  window.scrollTo(0, 0);
+}
+
+/* =====================================================================
+   데이터 백업 / 복원 / 초기화
+   ===================================================================== */
+function exportData() {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `가계부_백업_${today()}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast('백업 파일을 저장했어요');
+}
+function importData(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(reader.result);
+      if (!parsed.transactions) throw new Error('형식이 올바르지 않아요');
+      data = parsed;
+      if (!data.budget) data.budget = { total: {}, cats: {} };
+      if (!data.fixed) data.fixed = []; // ★ 추가
+      save(); renderAll(); toast('백업을 불러왔어요');
+    } catch (e) { toast('불러오기 실패: 파일을 확인해 주세요'); }
+  };
+  reader.readAsText(file);
+}
+function resetData() {
+  if (!confirm('모든 내역과 예산이 삭제돼요. 계속할까요?')) return;
+  data = { transactions: [], budget: { total: {}, cats: {} }, fixed: [], corp: { limit: 50000, entries: [] } }; // ★ 법카도 초기화
+  save(); renderAll(); toast('초기화했어요');
+}
+
+/* =====================================================================
+   이벤트 바인딩
+   ===================================================================== */
+function bind() {
+  // 탭바
+  document.querySelectorAll('.tabbar .tab').forEach(t =>
+    t.addEventListener('click', () => switchTab(t.getAttribute('data-tab'))));
+
+  // 월 이동 (각 탭 공통)
+  document.querySelectorAll('[data-mv]').forEach(b =>
+    b.addEventListener('click', () => moveMonth(parseInt(b.getAttribute('data-mv'), 10))));
+
+  // 통계 지출/수입 토글
+  document.querySelectorAll('.stat-toggle button').forEach(b =>
+    b.addEventListener('click', () => {
+      state.statType = b.getAttribute('data-stat');
+      document.querySelectorAll('.stat-toggle button').forEach(x =>
+        x.classList.toggle('on', x === b));
+      renderStats();
+    }));
+
+  // FAB / 시트
+  document.getElementById('fab').addEventListener('click', () => {
+    if (state.tab === 'corp') openCorp(null); else openSheet(null);   // ★ 법카 탭에선 법카 입력
+  });
+  document.getElementById('sheet-cancel').addEventListener('click', closeSheet);
+  document.getElementById('sheet-save').addEventListener('click', saveTx);
+  document.getElementById('big-save').addEventListener('click', saveTx);
+  document.getElementById('big-delete').addEventListener('click', deleteTx);
+  backdrop.addEventListener('click', closeSheet);
+
+  // 타입 토글
+  document.getElementById('tt-expense').addEventListener('click', () => applyType('expense'));
+  document.getElementById('tt-income').addEventListener('click', () => applyType('income'));
+
+  // 금액 입력 자동 콤마
+  const amt = document.getElementById('amt-input');
+  amt.addEventListener('input', () => { amt.value = formatInput(amt.value); });
+
+  // 거래 항목 클릭 → 수정 (이벤트 위임)
+  document.getElementById('ledger-list').addEventListener('click', e => {
+    const row = e.target.closest('.tx');
+    if (!row) return;
+    const id = Number(row.getAttribute('data-id'));
+    const tx = data.transactions.find(t => t.id === id);
+    if (tx) openSheet(tx);
+  });
+
+  // ★ 추가: 고정지출 칸 — 추가 버튼 & 항목 클릭(수정)
+  document.getElementById('ledger-fixed').addEventListener('click', e => {
+    if (e.target.closest('#add-fixed')) { openFixed(null); return; }
+    const row = e.target.closest('[data-fixed-id]');
+    if (row) {
+      const f = data.fixed.find(x => x.id === Number(row.getAttribute('data-fixed-id')));
+      if (f) openFixed(f);
+    }
+  });
+
+  // ★ 추가: 결제일 옵션 채우기 (매월 1~31일)
+  document.getElementById('fx-day').innerHTML =
+    Array.from({ length: 31 }, (_, i) => `<option value="${i+1}">매월 ${i+1}일</option>`).join('');
+
+  // ★ 추가: 고정지출 시트 이벤트
+  document.getElementById('fx-cancel').addEventListener('click', closeFixed);
+  document.getElementById('fx-save').addEventListener('click', saveFixed);
+  document.getElementById('fx-big-save').addEventListener('click', saveFixed);
+  document.getElementById('fx-delete').addEventListener('click', deleteFixed);
+  fxBackdrop.addEventListener('click', closeFixed);
+  const fxAmt = document.getElementById('fx-amt');
+  fxAmt.addEventListener('input', () => { fxAmt.value = formatInput(fxAmt.value); });
+
+  // "예산 설정하기" 링크 → 예산 탭
+  document.getElementById('ledger-list').closest('main').addEventListener('click', e => {
+    if (e.target.id === 'go-budget') switchTab('budget');
+  });
+
+  // 전체 예산 입력
+  const bt = document.getElementById('budget-total-input');
+  bt.addEventListener('input', () => { bt.value = formatInput(bt.value); });
+  bt.addEventListener('change', () => {
+    const ym = ymKey(state.year, state.month);
+    const v = parseNum(bt.value);
+    if (v > 0) data.budget.total[ym] = v; else delete data.budget.total[ym];
+    save(); renderAll();
+  });
+
+  // 데이터 관리
+  document.getElementById('btn-export').addEventListener('click', exportData);
+  document.getElementById('btn-import').addEventListener('click', () =>
+    document.getElementById('import-file').click());
+  document.getElementById('import-file').addEventListener('change', e => {
+    if (e.target.files[0]) importData(e.target.files[0]);
+    e.target.value = '';
+  });
+  document.getElementById('btn-reset').addEventListener('click', resetData);
+
+  // ★ 법카 이벤트
+  document.getElementById('corp-cancel').addEventListener('click', closeCorp);
+  document.getElementById('corp-save').addEventListener('click', saveCorp);
+  document.getElementById('corp-big-save').addEventListener('click', saveCorp);
+  document.getElementById('corp-delete').addEventListener('click', deleteCorp);
+  corpBackdrop.addEventListener('click', closeCorp);
+  const corpAmt = document.getElementById('corp-amt');
+  corpAmt.addEventListener('input', () => { corpAmt.value = formatInput(corpAmt.value); });
+  // 사용 내역 클릭 → 수정
+  document.getElementById('corp-list').addEventListener('click', e => {
+    const row = e.target.closest('[data-corp-id]');
+    if (!row) return;
+    const en = data.corp.entries.find(x => x.id === Number(row.getAttribute('data-corp-id')));
+    if (en) openCorp(en);
+  });
+  // 월 한도 입력
+  const cl = document.getElementById('corp-limit-input');
+  cl.addEventListener('input', () => { cl.value = formatInput(cl.value); });
+  cl.addEventListener('change', () => { data.corp.limit = parseNum(cl.value); save(); renderCorp(); });
+}
+
+/* =====================================================================
+   제작자 표시 (★ 추가)
+   ===================================================================== */
+const CREDIT = "혜진";   // ★ 여기 이름을 원하는 텍스트로 바꾸면 돼
+function renderCredit() {
+  document.getElementById('credit').innerHTML = `made by <b>${escapeHtml(CREDIT)}</b> · 2026`;
+}
+
+/* =====================================================================
+   앱 잠금 (4자리 비밀번호) (★ 추가)
+   - 잠금 설정은 가계부 데이터와 분리된 별도 저장소에 보관(백업에 안 섞임)
+   - 지나가다 훔쳐보는 걸 막는 용도의 간단한 잠금(전문 암호화 아님)
+   ===================================================================== */
+const LKEY = 'gagyebu_lock_v1';
+let lock = { enabled: false, pin: null };
+function loadLock() {
+  try { const r = localStorage.getItem(LKEY); if (r) lock = JSON.parse(r); } catch (e) {}
+  if (typeof lock.enabled !== 'boolean') lock.enabled = false;
+}
+function saveLock() { try { localStorage.setItem(LKEY, JSON.stringify(lock)); } catch (e) {} }
+function hashPin(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h<<5)+h + s.charCodeAt(i)) >>> 0; return 'h' + h; }
+
+let pinMode = null;   // unlock / setNew / confirmNew / verifyOff / verifyChange
+let pinBuf = '';
+let pinTemp = '';
+const lockScreen = document.getElementById('lock-screen');
+
+function buildKeypad() {
+  const kp = document.getElementById('keypad');
+  const keys = ['1','2','3','4','5','6','7','8','9','','0','del'];
+  kp.innerHTML = keys.map(k => {
+    if (k === '') return `<button class="key blank"></button>`;
+    if (k === 'del') return `<button class="key fn" data-k="del" aria-label="지우기">⌫</button>`;
+    return `<button class="key" data-k="${k}">${k}</button>`;
+  }).join('');
+  kp.querySelectorAll('.key[data-k]').forEach(b => b.addEventListener('click', () => {
+    const k = b.getAttribute('data-k');
+    if (k === 'del') pinDel(); else pinPush(k);
+  }));
+}
+function updateDots() {
+  document.getElementById('pin-dots').innerHTML =
+    [0,1,2,3].map(i => `<span class="dot ${i < pinBuf.length ? 'on' : ''}"></span>`).join('');
+}
+function lockSub(msg, isErr) {
+  const s = document.getElementById('lock-sub');
+  s.textContent = msg || '\u00a0';
+  s.className = 'lock-sub' + (isErr ? ' err' : '');
+}
+function setLockTitle() {
+  const T = { unlock:'비밀번호 입력', setNew:'새 비밀번호 4자리', confirmNew:'한 번 더 입력',
+              verifyOff:'현재 비밀번호 입력', verifyChange:'현재 비밀번호 입력' };
+  document.getElementById('lock-title').textContent = T[pinMode] || '비밀번호 입력';
+}
+function openLock(mode, sub) {
+  pinMode = mode; pinBuf = ''; if (mode === 'setNew') pinTemp = '';
+  setLockTitle(); lockSub(sub || ''); updateDots();
+  document.getElementById('lock-cancel').style.visibility = (mode === 'unlock') ? 'hidden' : 'visible';
+  lockScreen.classList.add('show');
+}
+function hideLock() { lockScreen.classList.remove('show'); pinMode = null; pinBuf = ''; pinTemp = ''; }
+function shakeClear(msg) {
+  const d = document.getElementById('pin-dots');
+  d.classList.add('shake'); lockSub(msg, true);
+  setTimeout(() => { d.classList.remove('shake'); pinBuf = ''; updateDots(); }, 420);
+}
+function pinDel() { if (pinBuf.length) { pinBuf = pinBuf.slice(0, -1); updateDots(); } }
+function pinPush(d) {
+  if (pinBuf.length >= 4) return;
+  pinBuf += d; updateDots();
+  if (pinBuf.length === 4) setTimeout(handlePinComplete, 120);
+}
+function handlePinComplete() {
+  const entered = pinBuf;
+  if (pinMode === 'unlock') {
+    if (hashPin(entered) === lock.pin) hideLock(); else shakeClear('비밀번호가 틀렸어요');
+  } else if (pinMode === 'setNew') {
+    pinTemp = entered; pinMode = 'confirmNew'; pinBuf = ''; setLockTitle(); lockSub(''); updateDots();
+  } else if (pinMode === 'confirmNew') {
+    if (entered === pinTemp) {
+      lock.enabled = true; lock.pin = hashPin(entered); saveLock();
+      hideLock(); refreshLockUI(); toast('앱 잠금을 켰어요');
+    } else {
+      pinMode = 'setNew'; pinTemp = ''; setLockTitle(); shakeClear('비밀번호가 달라요. 다시 설정하세요');
+    }
+  } else if (pinMode === 'verifyOff') {
+    if (hashPin(entered) === lock.pin) {
+      lock.enabled = false; lock.pin = null; saveLock();
+      hideLock(); refreshLockUI(); toast('앱 잠금을 껐어요');
+    } else shakeClear('비밀번호가 틀렸어요');
+  } else if (pinMode === 'verifyChange') {
+    if (hashPin(entered) === lock.pin) openLock('setNew', '');
+    else shakeClear('비밀번호가 틀렸어요');
+  }
+}
+function refreshLockUI() {
+  document.getElementById('lock-switch').classList.toggle('on', lock.enabled);
+  document.getElementById('btn-change-pin').style.display = lock.enabled ? 'flex' : 'none';
+}
+function bindLock() {
+  buildKeypad();
+  document.getElementById('lock-cancel').addEventListener('click', () => { hideLock(); refreshLockUI(); });
+  document.getElementById('lock-row').addEventListener('click', () => {
+    if (lock.enabled) openLock('verifyOff', '잠금을 끄려면 입력하세요');
+    else openLock('setNew', '');
+  });
+  document.getElementById('btn-change-pin').addEventListener('click', () =>
+    openLock('verifyChange', '변경하려면 현재 비밀번호를 입력하세요'));
+  // 앱이 백그라운드로 갔다가 돌아오면 다시 잠금
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && lock.enabled && (pinMode === null || pinMode === 'unlock'))
+      openLock('unlock', '');
+  });
+}
+
+/* =====================================================================
+   홈 화면 추가 (설치) (★ 추가)
+   - 안드로이드: 브라우저 설치창을 버튼으로 바로 띄움(beforeinstallprompt)
+   - 아이폰: 자동 설치가 막혀 있어 "공유 → 홈 화면에 추가" 안내를 띄움
+   ===================================================================== */
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredPrompt = e; });
+window.addEventListener('appinstalled', () => { deferredPrompt = null; refreshInstallUI(); toast('홈 화면에 추가됐어요'); });
+
+function isStandalone() {
+  return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+}
+function isIOS() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+function refreshInstallUI() {
+  document.getElementById('btn-install').style.display = isStandalone() ? 'none' : 'flex';
+}
+async function installApp() {
+  if (isStandalone()) { toast('이미 홈 화면에 있어요'); return; }
+  if (deferredPrompt) {                       // 안드로이드 크롬 등
+    deferredPrompt.prompt();
+    try { await deferredPrompt.userChoice; } catch (e) {}
+    deferredPrompt = null;
+    return;
+  }
+  openInstallHelp();                          // 아이폰 사파리 등 → 안내
+}
+function openInstallHelp() {
+  document.getElementById('install-steps').innerHTML = isIOS()
+    ? `1. 사파리 아래쪽 <b>공유 버튼</b>(위로 향한 화살표)을 눌러요.<br>
+       2. 목록을 내려서 <b>홈 화면에 추가</b>를 선택해요.<br>
+       3. 오른쪽 위 <b>추가</b>를 누르면 끝!<br><br>
+       <span style="color:var(--muted);font-size:13px">※ 크롬 말고 <b>사파리</b>에서 열어야 돼요.</span>`
+    : `1. 브라우저 오른쪽 위 <b>⋮ 메뉴</b>를 눌러요.<br>
+       2. <b>앱 설치</b> 또는 <b>홈 화면에 추가</b>를 선택해요.<br>
+       3. <b>설치 / 추가</b>를 누르면 끝!`;
+  document.getElementById('install-backdrop').classList.add('open');
+  requestAnimationFrame(() => document.getElementById('install-sheet').classList.add('open'));
+}
+function closeInstallHelp() {
+  document.getElementById('install-sheet').classList.remove('open');
+  document.getElementById('install-backdrop').classList.remove('open');
+}
+
+/* =====================================================================
+   자동 업데이트 (서비스워커) (★ 수정: 강제 새로고침 제거 — 데이터 손실 방지)
+   - 온라인이면 앱을 '완전히 껐다 켤 때' 최신 index.html을 자동으로 불러옴
+   - 앱 실행 중에 강제로 새로고침하지 않음(iOS에서 리로드가 데이터를 날릴 수 있어서)
+   ===================================================================== */
+const APP_VERSION = 'v1.1';   // ★ 앱을 크게 바꿀 때 이 숫자를 올려주면 돼
+
+function initSW() {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    window.__sw = reg;
+  }).catch(() => {});
+  // ★ 제거: controllerchange → location.reload() 자동 새로고침
+  //    (앱 사용 중 갑자기 리로드되며 데이터가 사라지는 문제 방지)
+}
+async function checkUpdate() {
+  toast('업데이트 확인 중…');
+  try {
+    if (!navigator.serviceWorker) { toast('이 브라우저는 자동 업데이트 미지원'); return; }
+    const reg = window.__sw || await navigator.serviceWorker.getRegistration();
+    if (reg) {
+      await reg.update();
+      if (reg.installing || reg.waiting) {
+        toast('새 버전이 있어요 · 앱을 껐다 켜면 적용돼요');
+        return;
+      }
+    }
+    toast('최신 버전이에요');
+  } catch (e) { toast('업데이트 확인에 실패했어요'); }
+  // ★ 더 이상 location.reload()를 하지 않음 — 다음에 앱을 완전히 닫았다 열면 최신으로 갱신됨
+}
+
+function bindSettings() {
+  document.getElementById('app-version').textContent = APP_VERSION;
+  document.getElementById('btn-install').addEventListener('click', installApp);
+  document.getElementById('install-cancel').addEventListener('click', closeInstallHelp);
+  document.getElementById('install-backdrop').addEventListener('click', closeInstallHelp);
+  document.getElementById('btn-update').addEventListener('click', checkUpdate);
+  refreshInstallUI();
+}
+
+/* ---------- 시작 ---------- */
+load();
+loadLock();        // ★ 잠금 설정 불러오기
+bind();
+bindLock();        // ★ 잠금 이벤트 연결
+bindSettings();    // ★ 설정 탭(설치·업데이트) 이벤트 연결
+renderCredit();    // ★ 제작자 표시
+refreshLockUI();   // ★ 스위치 상태 반영
+renderAll();
+recoverFromIDB();  // ★ localStorage가 비었으면 IndexedDB에서 자동 복구
+initSW();          // ★ 서비스워커 등록(자동 업데이트)
+if (lock.enabled) openLock('unlock', '');   // ★ 켜져 있으면 시작하자마자 잠금
+</script>
+</body>
+</html>
