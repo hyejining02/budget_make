@@ -120,6 +120,7 @@
   .summary .val.out { color: var(--expense); }
   .carry-note { font-size: 12.5px; color: var(--muted); margin-top: 14px; text-align: center; }
   .carry-note b { font-weight: 700; color: var(--ink); }
+  .living-hero { font-size: 32px; font-weight: 800; letter-spacing: -.6px; margin-top: 4px; color: var(--income); }
   .divider { height: 1px; background: var(--line); margin: 16px 0; border: 0; }
 
   /* 예산 게이지 */
@@ -393,23 +394,26 @@
 
       <!-- 이번 달 요약 히어로 카드 -->
       <div class="card summary">
+        <div class="cap">남은 생활비 <span style="color:var(--muted);font-weight:600">(수입 − 고정지출 기준)</span></div>
+        <div class="living-hero num" id="living-remaining">₩0</div>
+        <div class="gauge" style="margin-top:14px"><i id="living-gauge"></i></div>
+        <div class="budget-hint num" id="living-hint">수입을 입력하면 생활비가 표시돼요</div>
+        <hr class="divider">
         <div class="row">
           <div class="cell">
             <div class="cap">수입</div>
-            <div class="val in num" id="sum-income">₩0</div>
+            <div class="val in num" id="s-income">₩0</div>
           </div>
           <div class="cell">
-            <div class="cap">지출</div>
-            <div class="val out num" id="sum-expense">₩0</div>
+            <div class="cap">고정지출</div>
+            <div class="val num" id="s-fixed" style="color:var(--amber)">₩0</div>
           </div>
           <div class="cell">
-            <div class="cap">잔액</div>
-            <div class="val num" id="sum-balance">₩0</div>
+            <div class="cap">변동지출</div>
+            <div class="val out num" id="s-variable">₩0</div>
           </div>
         </div>
         <div class="carry-note" id="carry-note"><!-- ★ 이월 안내 (JS로 채움) --></div>
-        <hr class="divider">
-        <div class="budget-block" id="ledger-budget"><!-- JS로 채움 --></div>
       </div>
 
       <div id="ledger-fixed"><!-- ★ 추가: 고정지출 칸 (JS로 채움) --></div>
@@ -910,7 +914,7 @@ function fitVal(el) {
   while (el.scrollWidth > cw && size > 11) { size -= 0.5; el.style.fontSize = size + 'px'; }
 }
 function fitSummary() {
-  ['sum-income', 'sum-expense', 'sum-balance'].forEach(id => fitVal(document.getElementById(id)));
+  ['s-income', 's-fixed', 's-variable'].forEach(id => fitVal(document.getElementById(id)));
 }
 
 /* ---------- 고정지출 칸 (★ 추가) ---------- */
@@ -947,55 +951,44 @@ function renderLedgerFixed() {
 
 /* ---------- 내역 탭 ---------- */
 function renderLedger() {
-  renderLedgerFixed(); // ★ 추가: 상단 고정지출 칸 먼저 그리기
+  renderLedgerFixed(); // 상단 고정지출 칸 먼저 그리기
   const txs = txInMonth();
   const income = txs.filter(t => t.type === 'income').reduce((a, t) => a + t.amount, 0);
-  // ★ 추가: 지출 합계 = 변동지출 + 고정지출
-  const expense = txs.filter(t => t.type === 'expense').reduce((a, t) => a + t.amount, 0)
-                  + fixedTotal();
+  const variable = txs.filter(t => t.type === 'expense').reduce((a, t) => a + t.amount, 0); // 변동지출(고정 제외)
+  const fixed = fixedTotal();               // 이번 달 고정지출
+  const living = income - fixed;            // ★ 생활비 = 수입 − 고정지출
+  const remaining = living - variable;      // ★ 남은 생활비(이번 달)
 
-  document.getElementById('sum-income').textContent = won(income);
-  document.getElementById('sum-expense').textContent = won(expense);
+  // 남은 생활비 (히어로)
+  const heroEl = document.getElementById('living-remaining');
+  heroEl.textContent = (remaining < 0 ? '-' : '') + won(Math.abs(remaining));
+  heroEl.style.color = remaining < 0 ? 'var(--expense)' : 'var(--income)';
 
-  // ★ 이월 잔액 반영
-  const monthNet = income - expense;         // 이번 달 수지
-  const carry = carryBefore();               // 지난달까지 이월
-  const carryOn = data.settings.carryover;
-  const balance = carryOn ? carry + monthNet : monthNet;
-  const balEl = document.getElementById('sum-balance');
-  balEl.textContent = (balance < 0 ? '-' : '') + won(Math.abs(balance));
-  balEl.style.color = balance < 0 ? 'var(--expense)' : 'var(--ink)';
+  // 생활비 게이지 (변동지출 / 생활비)
+  const ratio = living > 0 ? variable / living : (variable > 0 ? 1 : 0);
+  const color = ratio > 1 ? 'var(--expense)' : ratio > 0.8 ? 'var(--amber)' : 'var(--accent)';
+  document.getElementById('living-gauge').style.width = Math.min(ratio * 100, 100) + '%';
+  document.getElementById('living-gauge').style.background = color;
+  document.getElementById('living-hint').textContent =
+    living > 0 ? `생활비 ${won(living)} 중 ${won(variable)} 사용 (${Math.round(ratio * 100)}%)`
+               : (income > 0 ? '고정지출이 수입보다 많아요' : '수입을 입력하면 생활비가 표시돼요');
 
+  // 상세 3칸
+  document.getElementById('s-income').textContent = won(income);
+  document.getElementById('s-fixed').textContent = won(fixed);
+  document.getElementById('s-variable').textContent = won(variable);
+  fitSummary();
+
+  // 이월 안내 (실제 잔액)
+  const carry = carryBefore();
   const note = document.getElementById('carry-note');
-  if (carryOn) {
-    const sign = monthNet >= 0 ? '+' : '-';
+  if (data.settings.carryover && carry !== 0) {
+    const real = carry + remaining;   // 이월 포함 실제 잔액
     note.style.display = 'block';
-    note.innerHTML = `지난달까지 이월 <b class="num">${(carry < 0 ? '-' : '') + won(Math.abs(carry))}</b>` +
-                     ` · 이번 달 <b class="num">${sign}${won(Math.abs(monthNet))}</b>`;
+    note.innerHTML = `이월 <b class="num">${(carry < 0 ? '-' : '') + won(Math.abs(carry))}</b>` +
+                     ` 포함 실제 잔액 <b class="num">${(real < 0 ? '-' : '') + won(Math.abs(real))}</b>`;
   } else {
     note.style.display = 'none';
-  }
-  fitSummary();   // ★ 칸 폭에 맞춰 숫자 크기 자동 조정
-
-  // 예산 게이지
-  const total = data.budget.total[ymKey(state.year, state.month)] || 0;
-  const bEl = document.getElementById('ledger-budget');
-  if (total > 0) {
-    const ratio = expense / total;
-    const pct = Math.min(ratio * 100, 100);
-    const color = ratio > 1 ? 'var(--expense)' : ratio > 0.75 ? 'var(--amber)' : 'var(--accent)';
-    const left = total - expense;
-    bEl.innerHTML = `
-      <div class="gtop">
-        <span class="t">이번 달 예산</span>
-        <span class="r num" style="color:${left < 0 ? 'var(--expense)' : 'var(--ink)'}">
-          ${left < 0 ? '초과 ' + won(-left) : won(left) + ' 남음'}
-        </span>
-      </div>
-      <div class="gauge"><i style="width:${pct}%;background:${color}"></i></div>
-      <div class="budget-hint num">${won(expense)} / ${won(total)} 사용 (${Math.round(ratio*100)}%)</div>`;
-  } else {
-    bEl.innerHTML = `<div class="budget-hint">예산 미설정 · <span class="set-budget-link" id="go-budget">예산 설정하기</span></div>`;
   }
 
   // 거래내역 (날짜별 그룹)
