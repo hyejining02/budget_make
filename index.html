@@ -113,11 +113,13 @@
   /* ---------- 이번 달 요약(히어로) ---------- */
   .summary { padding: 20px; margin-bottom: 16px; }
   .summary .row { display: flex; gap: 12px; }
-  .summary .cell { flex: 1; }
+  .summary .cell { flex: 1; min-width: 0; }   /* ★ min-width:0 → 칸이 숫자 때문에 늘어나지 않게 */
   .summary .cap { font-size: 12.5px; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
-  .summary .val { font-size: 19px; font-weight: 800; letter-spacing: -.5px; }
+  .summary .val { font-size: 19px; font-weight: 800; letter-spacing: -.5px; white-space: nowrap; overflow: hidden; }   /* ★ 넘치면 숨김(→ JS가 크기 자동 축소) */
   .summary .val.in { color: var(--income); }
   .summary .val.out { color: var(--expense); }
+  .carry-note { font-size: 12.5px; color: var(--muted); margin-top: 14px; text-align: center; }
+  .carry-note b { font-weight: 700; color: var(--ink); }
   .divider { height: 1px; background: var(--line); margin: 16px 0; border: 0; }
 
   /* 예산 게이지 */
@@ -160,6 +162,33 @@
   .add-fixed:active { background: var(--card-2); }
   .tx .pin { font-size: 11px; font-weight: 700; color: var(--muted); background: var(--card-2); padding: 2px 7px; border-radius: 6px; margin-left: 8px; }
   .field-row select { border: none; background: transparent; color: var(--ink); font-size: 15px; text-align: right; outline: none; -webkit-appearance: none; appearance: none; padding-right: 2px; }
+
+  /* ---------- 카테고리 관리 (★ 추가) ---------- */
+  .cat-add-row { display: flex; gap: 8px; align-items: center; }
+  .cat-add-row select {
+    width: 62px; height: 46px; text-align: center; font-size: 22px;
+    border: 1px solid var(--line); background: var(--card); border-radius: 12px;
+    color: var(--ink); outline: none; -webkit-appearance: none; appearance: none; flex-shrink: 0;
+  }
+  .cat-add-row input {
+    flex: 1; min-width: 0; height: 46px; border: 1px solid var(--line); background: var(--card);
+    border-radius: 12px; padding: 0 14px; font-size: 15px; color: var(--ink); outline: none;
+  }
+  .cat-add-row input:focus { border-color: var(--accent); }
+  .cat-add-row button {
+    height: 46px; padding: 0 16px; border-radius: 12px; background: var(--accent); color: #fff;
+    font-size: 15px; font-weight: 700; flex-shrink: 0;
+  }
+  .cat-add-row button:active { opacity: .9; }
+  .cat-manage {
+    display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+    background: var(--card); border-bottom: 1px solid var(--line);
+  }
+  .cat-manage:last-child { border-bottom: none; }
+  .cat-manage .emo { width: 36px; height: 36px; border-radius: 10px; background: var(--card-2); display: grid; place-items: center; font-size: 19px; }
+  .cat-manage .nm { flex: 1; font-size: 15px; font-weight: 600; }
+  .cat-manage .del { width: 30px; height: 30px; border-radius: 50%; background: var(--expense-soft); color: var(--expense); font-size: 17px; font-weight: 700; display: grid; place-items: center; }
+  .cat-manage .del:active { opacity: .7; }
 
   /* ---------- 빈 상태 ---------- */
   .empty { text-align: center; padding: 60px 20px; color: var(--muted); }
@@ -378,6 +407,7 @@
             <div class="val num" id="sum-balance">₩0</div>
           </div>
         </div>
+        <div class="carry-note" id="carry-note"><!-- ★ 이월 안내 (JS로 채움) --></div>
         <hr class="divider">
         <div class="budget-block" id="ledger-budget"><!-- JS로 채움 --></div>
       </div>
@@ -459,6 +489,19 @@
       <div class="section-title">앱 설치</div>
       <div class="data-btns">
         <button class="data-btn" id="btn-install">홈 화면에 추가 <span class="chev">›</span></button>
+      </div>
+
+      <div class="section-title">표시</div>
+      <div class="data-btns">
+        <div class="data-btn" id="carry-row">
+          <span>이월 잔액 표시</span>
+          <span class="switch" id="carry-switch"><i></i></span>
+        </div>
+      </div>
+
+      <div class="section-title">카테고리</div>
+      <div class="data-btns">
+        <button class="data-btn" id="btn-cats">카테고리 추가·삭제 <span class="chev">›</span></button>
       </div>
 
       <div class="section-title">보안</div>
@@ -573,6 +616,30 @@
     <button class="delete-btn" id="fx-delete" style="display:none">이 고정지출 삭제</button>
   </div>
 
+  <!-- ★ 추가: 카테고리 관리 시트 -->
+  <div class="backdrop" id="cat-backdrop"></div>
+  <div class="sheet" id="cat-sheet">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <button class="cancel" id="cat-close">닫기</button>
+      <div class="title">카테고리 관리</div>
+      <span style="width:32px"></span>
+    </div>
+    <div class="type-toggle" style="margin-bottom:16px">
+      <button id="cat-t-expense" class="on-out">지출</button>
+      <button id="cat-t-income">수입</button>
+    </div>
+    <div class="field-label">새 카테고리 추가</div>
+    <div class="cat-add-row">
+      <select id="cat-emoji" aria-label="이모지 선택"></select>
+      <input type="text" id="cat-name" placeholder="카테고리 이름" maxlength="10">
+      <button id="cat-add">추가</button>
+    </div>
+    <div class="field-label" style="margin-top:18px">현재 카테고리</div>
+    <div class="card" id="cat-manage-list"></div>
+    <div style="height:8px"></div>
+  </div>
+
   <!-- ★ 추가: 법카 사용 입력 시트 -->
   <div class="backdrop" id="corp-backdrop"></div>
   <div class="sheet" id="corp-sheet">
@@ -635,8 +702,8 @@
    - 저장이 막힌 환경(샌드박스 등)에서는 메모리에만 유지되도록 예외처리
    ===================================================================== */
 
-/* ---------- 카테고리 정의 (이모지 아이콘 + 통계 색) ---------- */
-const CATS = {
+/* ---------- 카테고리 (사용자가 추가/삭제 가능 → data.cats에 저장) ---------- */
+const DEFAULT_CATS = {
   expense: [
     { name: '식비',       emo: '🍚', color: '#D84C3E' },
     { name: '카페/간식',  emo: '☕', color: '#E8973A' },
@@ -646,7 +713,9 @@ const CATS = {
     { name: '쇼핑',       emo: '🛍️', color: '#3A9EA5' },
     { name: '의료/건강',  emo: '💊', color: '#4A79C4' },
     { name: '문화/여가',  emo: '🎬', color: '#7A6BD1' },
-    { name: '교육',       emo: '📚', color: '#B85EA8' },
+    { name: '구독',       emo: '🔁', color: '#B85EA8' },
+    { name: '적금·예금',  emo: '🏦', color: '#2E8B7F' },
+    { name: '교육',       emo: '📚', color: '#C25E3A' },
     { name: '경조사',     emo: '🎁', color: '#C86A8E' },
     { name: '기타',       emo: '📦', color: '#8A9691' },
   ],
@@ -658,8 +727,14 @@ const CATS = {
     { name: '기타',       emo: '📦', color: '#8A9691' },
   ],
 };
+// 카테고리 추가 시 고를 수 있는 이모지 (콤보박스)
+const EMOJI_CHOICES = ['🍚','🍔','🍜','🍺','☕','🧻','🛒','🚌','🚗','⛽','🏠','📱','💡','🛍️','👕','💄','💊','🏥','💪','🎬','🎮','🎵','📚','🎓','🎁','✈️','🐶','👶','💰','🏦','📈','🔁','💳','🧾','❤️','💵','🎀','🔧','🌱','📦'];
+// 새 카테고리에 자동 배정할 색 팔레트
+const CAT_COLORS = ['#D84C3E','#E8973A','#E0B84A','#5AA469','#0D7C66','#3A9EA5','#4A79C4','#7A6BD1','#B85EA8','#C86A8E','#2E8B7F','#C25E3A','#6979D1','#4FA05A'];
+
 function catInfo(type, name) {
-  return CATS[type].find(c => c.name === name) || { name, emo: '📦', color: '#8A9691' };
+  const list = (data.cats && data.cats[type]) || [];
+  return list.find(c => c.name === name) || { name, emo: '📦', color: '#8A9691' };
 }
 
 /* ---------- 저장소 (localStorage + IndexedDB 이중 저장) ----------
@@ -676,6 +751,11 @@ function normalizeData() {
   if (!data.fixed) data.fixed = [];
   if (!data.corp) data.corp = { limit: 50000, entries: [] };   // ★ 추가: 법카(월 한도 + 사용 내역)
   if (!data.corp.entries) data.corp.entries = [];
+  if (!data.settings) data.settings = {};                       // ★ 추가: 표시 설정
+  if (typeof data.settings.carryover !== 'boolean') data.settings.carryover = true; // 이월 잔액 기본 켜짐
+  if (!data.cats) data.cats = JSON.parse(JSON.stringify(DEFAULT_CATS)); // ★ 추가: 카테고리(사용자 편집 가능)
+  if (!data.cats.expense) data.cats.expense = JSON.parse(JSON.stringify(DEFAULT_CATS.expense));
+  if (!data.cats.income) data.cats.income = JSON.parse(JSON.stringify(DEFAULT_CATS.income));
 }
 function load() {
   try {
@@ -779,6 +859,25 @@ function monthFixedTx() {
   }));
 }
 function fixedTotal() { return activeFixed().reduce((a, f) => a + f.amount, 0); }
+
+// ★ 추가: 지난달까지 누적된 이월 잔액 (전체 수입 - 전체 지출 - 이전 달들의 고정지출)
+function carryBefore() {
+  const curYM = ymKey(state.year, state.month);
+  const curIdx = state.year * 12 + state.month;
+  let inc = 0, exp = 0;
+  data.transactions.forEach(t => {
+    if (!t.date || t.date.slice(0, 7) >= curYM) return; // 이번 달 이전만
+    if (t.type === 'income') inc += t.amount; else exp += t.amount;
+  });
+  let fixedBefore = 0;
+  (data.fixed || []).forEach(f => {
+    const since = f.since || curYM;
+    const [sy, sm] = since.split('-').map(Number);
+    const sinceIdx = sy * 12 + (sm - 1);
+    fixedBefore += (f.amount || 0) * Math.max(0, curIdx - sinceIdx); // since ~ 지난달까지의 개월 수
+  });
+  return inc - exp - fixedBefore;
+}
 function moveMonth(dir) {
   state.month += dir;
   if (state.month < 0) { state.month = 11; state.year--; }
@@ -798,6 +897,20 @@ function renderAll() {
   renderStats();
   renderBudget();
   renderCorp();   // ★ 법카
+}
+
+/* ---------- 요약 금액 자동 크기 조정 (★ 추가) ----------
+   금액이 칸보다 길어지면(백만 원대 등) 글자 크기를 줄여서 칸 안에 맞춤 */
+function fitVal(el) {
+  if (!el) return;
+  el.style.fontSize = '';           // 기본 크기(19px)로 초기화
+  const cw = el.clientWidth;
+  if (!cw) return;                  // 화면에 안 보이면(폭 0) 건너뜀 → 보일 때 다시 조정
+  let size = 19;
+  while (el.scrollWidth > cw && size > 11) { size -= 0.5; el.style.fontSize = size + 'px'; }
+}
+function fitSummary() {
+  ['sum-income', 'sum-expense', 'sum-balance'].forEach(id => fitVal(document.getElementById(id)));
 }
 
 /* ---------- 고정지출 칸 (★ 추가) ---------- */
@@ -843,7 +956,26 @@ function renderLedger() {
 
   document.getElementById('sum-income').textContent = won(income);
   document.getElementById('sum-expense').textContent = won(expense);
-  document.getElementById('sum-balance').textContent = won(income - expense);
+
+  // ★ 이월 잔액 반영
+  const monthNet = income - expense;         // 이번 달 수지
+  const carry = carryBefore();               // 지난달까지 이월
+  const carryOn = data.settings.carryover;
+  const balance = carryOn ? carry + monthNet : monthNet;
+  const balEl = document.getElementById('sum-balance');
+  balEl.textContent = (balance < 0 ? '-' : '') + won(Math.abs(balance));
+  balEl.style.color = balance < 0 ? 'var(--expense)' : 'var(--ink)';
+
+  const note = document.getElementById('carry-note');
+  if (carryOn) {
+    const sign = monthNet >= 0 ? '+' : '-';
+    note.style.display = 'block';
+    note.innerHTML = `지난달까지 이월 <b class="num">${(carry < 0 ? '-' : '') + won(Math.abs(carry))}</b>` +
+                     ` · 이번 달 <b class="num">${sign}${won(Math.abs(monthNet))}</b>`;
+  } else {
+    note.style.display = 'none';
+  }
+  fitSummary();   // ★ 칸 폭에 맞춰 숫자 크기 자동 조정
 
   // 예산 게이지
   const total = data.budget.total[ymKey(state.year, state.month)] || 0;
@@ -1016,7 +1148,7 @@ function renderBudget() {
              .forEach(t => { spentByCat[t.category] = (spentByCat[t.category]||0) + t.amount; });
 
   const wrap = document.getElementById('cat-budget-list');
-  wrap.innerHTML = CATS.expense.map(c => {
+  wrap.innerHTML = data.cats.expense.map(c => {
     const b = catBudgets[c.name] || 0;
     const spent = spentByCat[c.name] || 0;
     const ratio = b > 0 ? spent / b : 0;
@@ -1090,7 +1222,7 @@ function applyType(type) {
   exp.className = type === 'expense' ? 'on-out' : '';
   inc.className = type === 'income' ? 'on-in' : '';
   // 카테고리가 새 타입에 없으면 초기화
-  if (!CATS[type].some(c => c.name === state.formCat)) state.formCat = null;
+  if (!data.cats[type].some(c => c.name === state.formCat)) state.formCat = null;
   // 저장 버튼 색
   const bs = document.getElementById('big-save');
   bs.className = 'save-btn' + (type === 'expense' ? ' exp' : '');
@@ -1099,7 +1231,7 @@ function applyType(type) {
 
 function renderChips() {
   const wrap = document.getElementById('cat-chips');
-  wrap.innerHTML = CATS[state.formType].map(c => `
+  wrap.innerHTML = data.cats[state.formType].map(c => `
     <button class="chip ${state.formCat===c.name ? (state.formType==='expense'?'on exp':'on') : ''}" data-cat="${c.name}">
       <span class="e">${c.emo}</span>${c.name}
     </button>`).join('');
@@ -1170,7 +1302,7 @@ function closeFixed() {
 }
 function renderFxChips() {
   const wrap = document.getElementById('fx-chips');
-  wrap.innerHTML = CATS.expense.map(c => `
+  wrap.innerHTML = data.cats.expense.map(c => `
     <button class="chip ${fxCat===c.name ? 'on exp' : ''}" data-cat="${c.name}">
       <span class="e">${c.emo}</span>${c.name}
     </button>`).join('');
@@ -1320,6 +1452,68 @@ function deleteCorp() {
 }
 
 /* =====================================================================
+   카테고리 관리 (★ 추가) — 지출/수입 카테고리 추가·삭제
+   ===================================================================== */
+let catMgmtType = 'expense';
+const catSheet = document.getElementById('cat-sheet');
+const catBackdrop = document.getElementById('cat-backdrop');
+
+function openCatMgmt() {
+  // 이모지 콤보박스 채우기
+  document.getElementById('cat-emoji').innerHTML =
+    EMOJI_CHOICES.map(e => `<option value="${e}">${e}</option>`).join('');
+  setCatMgmtType('expense');
+  catBackdrop.classList.add('open');
+  requestAnimationFrame(() => catSheet.classList.add('open'));
+}
+function closeCatMgmt() {
+  catSheet.classList.remove('open');
+  catBackdrop.classList.remove('open');
+  document.activeElement && document.activeElement.blur();
+}
+function setCatMgmtType(type) {
+  catMgmtType = type;
+  document.getElementById('cat-t-expense').className = type === 'expense' ? 'on-out' : '';
+  document.getElementById('cat-t-income').className = type === 'income' ? 'on-in' : '';
+  renderCatMgmt();
+}
+function renderCatMgmt() {
+  const list = data.cats[catMgmtType] || [];
+  document.getElementById('cat-manage-list').innerHTML = list.map(c => `
+    <div class="cat-manage" data-name="${escapeHtml(c.name)}">
+      <div class="emo">${c.emo}</div>
+      <div class="nm">${escapeHtml(c.name)}</div>
+      <button class="del" aria-label="삭제">×</button>
+    </div>`).join('');
+}
+function addCat() {
+  const emo = document.getElementById('cat-emoji').value;
+  const nameEl = document.getElementById('cat-name');
+  const name = nameEl.value.trim();
+  if (!name) { toast('이름을 입력해 주세요'); return; }
+  if (data.cats[catMgmtType].some(c => c.name === name)) { toast('이미 있는 카테고리예요'); return; }
+  const color = CAT_COLORS[data.cats[catMgmtType].length % CAT_COLORS.length];
+  // '기타'는 항상 맨 뒤로 유지되게, 그 앞에 추가
+  const arr = data.cats[catMgmtType];
+  const etcIdx = arr.findIndex(c => c.name === '기타');
+  const item = { name, emo, color };
+  if (etcIdx >= 0) arr.splice(etcIdx, 0, item); else arr.push(item);
+  save();
+  nameEl.value = '';
+  renderCatMgmt(); renderAll();   // 칩·예산·통계에 즉시 반영
+  toast('카테고리를 추가했어요');
+}
+function deleteCat(name) {
+  const arr = data.cats[catMgmtType];
+  if (arr.length <= 1) { toast('최소 1개는 있어야 해요'); return; }
+  if (!confirm(`'${name}' 카테고리를 삭제할까요?\n(이미 기록한 내역의 이름은 그대로 남아요)`)) return;
+  data.cats[catMgmtType] = arr.filter(c => c.name !== name);
+  save();
+  renderCatMgmt(); renderAll();
+  toast('삭제했어요');
+}
+
+/* =====================================================================
    토스트
    ===================================================================== */
 let toastTimer;
@@ -1346,6 +1540,7 @@ function switchTab(tab) {
   document.querySelectorAll('.tabbar .tab').forEach(t =>
     t.classList.toggle('on', t.getAttribute('data-tab') === tab));
   document.getElementById('fab').style.display = (tab === 'settings') ? 'none' : 'grid'; // ★ 설정 탭에선 + 숨김
+  if (tab === 'ledger') fitSummary();   // ★ 내역 탭 보일 때 금액 크기 다시 맞춤
   window.scrollTo(0, 0);
 }
 
@@ -1378,7 +1573,7 @@ function importData(file) {
 }
 function resetData() {
   if (!confirm('모든 내역과 예산이 삭제돼요. 계속할까요?')) return;
-  data = { transactions: [], budget: { total: {}, cats: {} }, fixed: [], corp: { limit: 50000, entries: [] } }; // ★ 법카도 초기화
+  data = { transactions: [], budget: { total: {}, cats: {} }, fixed: [], corp: { limit: 50000, entries: [] }, settings: { carryover: true }, cats: JSON.parse(JSON.stringify(DEFAULT_CATS)) }; // ★ 카테고리도 기본값으로 초기화
   save(); renderAll(); toast('초기화했어요');
 }
 
@@ -1407,6 +1602,7 @@ function bind() {
   document.getElementById('fab').addEventListener('click', () => {
     if (state.tab === 'corp') openCorp(null); else openSheet(null);   // ★ 법카 탭에선 법카 입력
   });
+  window.addEventListener('resize', fitSummary);   // ★ 화면 크기/회전 시 금액 크기 재조정
   document.getElementById('sheet-cancel').addEventListener('click', closeSheet);
   document.getElementById('sheet-save').addEventListener('click', saveTx);
   document.getElementById('big-save').addEventListener('click', saveTx);
@@ -1698,7 +1894,32 @@ function bindSettings() {
   document.getElementById('install-cancel').addEventListener('click', closeInstallHelp);
   document.getElementById('install-backdrop').addEventListener('click', closeInstallHelp);
   document.getElementById('btn-update').addEventListener('click', checkUpdate);
+  // ★ 이월 잔액 표시 토글
+  document.getElementById('carry-row').addEventListener('click', () => {
+    data.settings.carryover = !data.settings.carryover;
+    save(); refreshCarryUI(); renderLedger();
+    toast(data.settings.carryover ? '이월 잔액을 켰어요' : '이월 잔액을 껐어요');
+  });
+  refreshCarryUI();
   refreshInstallUI();
+
+  // ★ 카테고리 관리
+  document.getElementById('btn-cats').addEventListener('click', openCatMgmt);
+  document.getElementById('cat-close').addEventListener('click', closeCatMgmt);
+  catBackdrop.addEventListener('click', closeCatMgmt);
+  document.getElementById('cat-t-expense').addEventListener('click', () => setCatMgmtType('expense'));
+  document.getElementById('cat-t-income').addEventListener('click', () => setCatMgmtType('income'));
+  document.getElementById('cat-add').addEventListener('click', addCat);
+  document.getElementById('cat-name').addEventListener('keydown', e => { if (e.key === 'Enter') addCat(); });
+  document.getElementById('cat-manage-list').addEventListener('click', e => {
+    const del = e.target.closest('.del');
+    if (!del) return;
+    const row = e.target.closest('[data-name]');
+    if (row) deleteCat(row.getAttribute('data-name'));
+  });
+}
+function refreshCarryUI() {
+  document.getElementById('carry-switch').classList.toggle('on', !!data.settings.carryover);
 }
 
 /* ---------- 시작 ---------- */
