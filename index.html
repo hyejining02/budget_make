@@ -161,6 +161,10 @@
   /* ---------- 고정지출 칸 (★ 추가) ---------- */
   .add-fixed { width: 100%; padding: 14px 16px; text-align: center; color: var(--accent); font-size: 14.5px; font-weight: 700; background: var(--card); }
   .add-fixed:active { background: var(--card-2); }
+  .fixed-head { cursor: pointer; user-select: none; -webkit-user-select: none; }
+  .fixed-head:active { opacity: .6; }
+  .fx-chev { color: var(--muted); font-size: 12px; margin-left: 4px; }
+  .fx-cnt { color: var(--muted); font-weight: 600; font-size: 12px; margin-left: 8px; }
   .tx .pin { font-size: 11px; font-weight: 700; color: var(--muted); background: var(--card-2); padding: 2px 7px; border-radius: 6px; margin-left: 8px; }
   .field-row select { border: none; background: transparent; color: var(--ink); font-size: 15px; text-align: right; outline: none; -webkit-appearance: none; appearance: none; padding-right: 2px; }
 
@@ -767,6 +771,7 @@ function normalizeData() {
   if (!data.settings) data.settings = {};                       // ★ 추가: 표시 설정
   if (typeof data.settings.carryover !== 'boolean') data.settings.carryover = true; // 이월 잔액 기본 켜짐
   if (typeof data.settings.cycleDay !== 'number') data.settings.cycleDay = 1; // ★ 급여 주기 시작일(1=달력)
+  if (typeof data.settings.fixedCollapsed !== 'boolean') data.settings.fixedCollapsed = false; // ★ 고정지출 접힘
   if (!data.cats) data.cats = JSON.parse(JSON.stringify(DEFAULT_CATS)); // ★ 추가: 카테고리(사용자 편집 가능)
   if (!data.cats.expense) data.cats.expense = JSON.parse(JSON.stringify(DEFAULT_CATS.expense));
   if (!data.cats.income) data.cats.income = JSON.parse(JSON.stringify(DEFAULT_CATS.income));
@@ -1001,6 +1006,7 @@ function fitSummary() {
 
 /* ---------- 고정지출 칸 (★ 추가) ---------- */
 function renderLedgerFixed() {
+  const collapsed = !!(data.settings && data.settings.fixedCollapsed);   // ★ 접힘 상태
   const active = activeFixed();
   const total = active.reduce((a, f) => a + f.amount, 0);
 
@@ -1021,14 +1027,14 @@ function renderLedgerFixed() {
     }).join('');
 
   document.getElementById('ledger-fixed').innerHTML = `
-    <div class="day-head">
-      <span class="d">📌 고정지출</span>
+    <div class="day-head fixed-head" id="fixed-toggle">
+      <span class="d">📌 고정지출 <span class="fx-chev">${collapsed ? '▸' : '▾'}</span>${active.length ? `<span class="fx-cnt">${active.length}건</span>` : ''}</span>
       ${total ? `<span class="sum num">매월 -${won(total)}</span>` : ''}
     </div>
-    <div class="card tx-list">
+    ${collapsed ? '' : `<div class="card tx-list">
       ${items}
       <button class="add-fixed" id="add-fixed">+ 고정지출 추가</button>
-    </div>`;
+    </div>`}`;
 }
 
 /* ---------- 내역 탭 ---------- */
@@ -1703,8 +1709,12 @@ function bind() {
     if (tx) openSheet(tx);
   });
 
-  // ★ 추가: 고정지출 칸 — 추가 버튼 & 항목 클릭(수정)
+  // ★ 추가: 고정지출 칸 — 헤더 접기/펴기 & 추가 버튼 & 항목 클릭(수정)
   document.getElementById('ledger-fixed').addEventListener('click', e => {
+    if (e.target.closest('#fixed-toggle')) {          // ★ 헤더 → 접었다 폈다
+      data.settings.fixedCollapsed = !data.settings.fixedCollapsed;
+      save(); renderLedgerFixed(); return;
+    }
     if (e.target.closest('#add-fixed')) { openFixed(null); return; }
     const row = e.target.closest('[data-fixed-id]');
     if (row) {
